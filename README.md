@@ -35,6 +35,8 @@ End-to-end loop: drop a PDF into Paperless, see it OCR'd, see the row land in SQ
 
 Do these steps in order. Run them all from a **single PowerShell window** — the working directory and the activated virtualenv carry forward from one step to the next.
 
+Some steps are easier in Windows Explorer than the terminal. Look for the **Or in Explorer:** notes under each step where there's a clean GUI alternative. The terminal commands are still given as the primary path because they're copy-pasteable and let you do the whole setup in one window.
+
 #### Step 1 — Clone the repo
 
 **Where:** any folder you keep code in (e.g. `C:\Users\<you>\Desktop\`).
@@ -43,6 +45,8 @@ Do these steps in order. Run them all from a **single PowerShell window** — th
 git clone https://github.com/<you>/plos-reference.git
 cd plos-reference
 ```
+
+**Or in Explorer:** clone with GitHub Desktop or any Git GUI, then open the resulting `plos-reference` folder in Explorer, hold **Shift** and right-click an empty area inside the folder, and pick **Open in Terminal** (Windows 11) or **Open PowerShell window here** (Windows 10). That gives you a PowerShell window already at the repo root — no `cd` needed.
 
 **Why:** Every later step assumes your working directory is the repo root (`...\plos-reference`). The `cd` puts you there.
 
@@ -58,6 +62,8 @@ mkdir G:\plos-data\paperless\data, G:\plos-data\paperless\media, `
 
 **This is a single PowerShell command.** The backticks (`` ` ``) at the end of lines are line continuations. Paste the whole three-line block at once.
 
+**Or in Explorer:** open `G:\` in Explorer and create the folder tree by hand — `plos-data\paperless\data`, `plos-data\paperless\media`, `plos-data\paperless\consume`, `plos-data\paperless\export`, and `plos-data\plos`. End state is identical; the terminal command is just faster to type.
+
 **Why:** Paperless and the worker write constantly — OCR'd PDFs, thumbnails, a search index, the Paperless DB, and the PLOS SQLite sidecar. Keeping all of that on `G:\plos-data\` (outside the repo) means `git status` stays clean and household documents never get committed by accident.
 
 #### Step 3 — Create your environment file
@@ -68,11 +74,13 @@ mkdir G:\plos-data\paperless\data, G:\plos-data\paperless\media, `
 copy .env.template .env
 ```
 
+**Stick with the terminal here.** Explorer hides dotfiles by default and renaming a copy to start with a `.` is fiddly — the `copy` command is genuinely the easier path for this one.
+
 **Why:** `.env` holds secrets — Paperless admin credentials and a signing key. It is gitignored. `.env.template` lists the required keys with empty values; copying it gives you a starting `.env` without exposing secrets to git.
 
 #### Step 4 — Edit `.env`
 
-Open `.env` in any text editor and set values for:
+Open `.env` in any text editor — Notepad, Notepad++, VS Code, whatever you have. It's a plain key=value file, no special syntax. Set values for:
 
 - `PAPERLESS_ADMIN_USER` — pick a username for the Paperless admin account.
 - `PAPERLESS_ADMIN_PASSWORD` — pick a password.
@@ -112,7 +120,9 @@ python scripts\init_db.py
 docker compose -f docker\docker-compose.yml --env-file .env up -d
 ```
 
-**Why:** Starts the Paperless-ngx container in the background. `-f docker\docker-compose.yml` points at the compose file in the `docker\` subfolder; `--env-file .env` feeds the admin/secret values into the container; `-d` runs it detached so your shell is free.
+This brings up two containers: `plos-paperless` and `plos-redis`. After this first `up -d` creates them, you can start/stop them later from the Docker Desktop UI (Containers tab) — no need to retype the command unless you change the compose file or `.env`.
+
+**Why:** Starts the Paperless-ngx container plus its required Redis sidecar in the background. `-f docker\docker-compose.yml` points at the compose file in the `docker\` subfolder; `--env-file .env` feeds the admin/secret values into the container; `-d` runs it detached so your shell is free.
 
 #### Step 7 — Verify Paperless is up
 
@@ -122,13 +132,11 @@ Open `http://localhost:<PAPERLESS_HOST_PORT>` in a browser — `http://localhost
 
 ### Run the demo
 
-You'll need **two PowerShell windows**, both `cd`'d into the repo root.
+You only need **one PowerShell window** (for the worker, so you can watch its log output). The "drop a PDF" half is just a file landing in a folder — Explorer is the natural way to do it.
 
-#### Terminal A — start the worker
+#### Action 1 — start the worker (PowerShell)
 
-**Where:** repo root.
-
-Run **one line at a time**:
+**Where:** repo root. If you closed the setup window, open a new PowerShell at the repo root (Shift+Right-click in the folder → **Open in Terminal**) and run **one line at a time**:
 
 ```powershell
 .venv\Scripts\activate
@@ -139,25 +147,25 @@ Leave this window open. The worker polls every 60 seconds and prints a log line 
 
 **Why:** The worker watches the SQLite `documents` table for rows the post-consume hook adds when Paperless ingests a file. In Phase 1 it just logs them; later phases will route them to extractors.
 
-#### Terminal B — drop a PDF into the consume folder
+#### Action 2 — drop a PDF into the consume folder (Explorer)
 
-**Where:** doesn't matter — the paths are absolute.
+Open `G:\plos-data\paperless\consume\` in Windows Explorer and drag any PDF into it. Save-from-browser, scan-to-folder, or right-click → Send To also work — Paperless watches the folder for any new file regardless of how it arrives.
+
+**Or in a terminal**, if you'd rather script it:
 
 ```powershell
 copy C:\path\to\some.pdf G:\plos-data\paperless\consume\
 ```
 
-Replace `C:\path\to\some.pdf` with the path to any real PDF on your machine.
-
-**Why:** Paperless watches `consume\`. When a file appears, it OCRs and files it, then runs the post-consume hook that writes a row into the PLOS SQLite sidecar.
+**Why:** Paperless watches `consume\`. When a file finishes writing, it OCRs and files it, then runs the post-consume hook that writes a row into the PLOS SQLite sidecar.
 
 ### What success looks like
 
 Within ~30 seconds, all three should be true:
 
 1. **In Paperless (browser at `http://localhost:<PAPERLESS_HOST_PORT>`)** — the document appears in the document list, OCR'd.
-2. **In SQLite (`G:\plos-data\plos\plos.db`)** — a new row in the `documents` table with `status='new'`, then `'done'`.
-3. **In Terminal A (the worker)** — a log line of the form `new document id=1 paperless_id=1 title='some.pdf'`.
+2. **In SQLite (`G:\plos-data\plos\plos.db`)** — a new row in the `documents` table with `status='new'`, then `'done'`. Open the `.db` file with [DB Browser for SQLite](https://sqlitebrowser.org/) (free, point-and-click) to peek inside without writing any SQL — easier than the `sqlite3` CLI for one-off checks.
+3. **In the worker window** — a log line of the form `new document id=1 paperless_id=1 title='some.pdf'`.
 
 That's the Phase 1 demo. Phase 2 adds the first extractor and writes to the vault.
 

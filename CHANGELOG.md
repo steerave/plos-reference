@@ -41,3 +41,9 @@ is the baseline and is not enumerated below.
 - README Quickstart rewritten as numbered steps with explicit working
   directory ("Where:") and rationale ("Why:") for each step, including
   notes on which commands are single multi-line statements vs. one-at-a-time.
+- README Quickstart now leads with the simplest path for each step and
+  adds **Or in Explorer:** notes where a Windows GUI alternative is
+  genuinely easier (folder creation, opening a terminal at the repo root,
+  dragging the PDF into the consume folder, browsing the SQLite sidecar
+  with DB Browser). The demo now requires only one terminal — the worker
+  — instead of two.
