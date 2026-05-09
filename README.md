@@ -36,9 +36,9 @@ git clone https://github.com/<you>/plos-reference.git
 cd plos-reference
 
 # Create the runtime data tree (lives outside the repo on purpose).
-mkdir C:\plos-data\paperless\data, C:\plos-data\paperless\media, `
-      C:\plos-data\paperless\consume, C:\plos-data\paperless\export, `
-      C:\plos-data\plos
+mkdir G:\plos-data\paperless\data, G:\plos-data\paperless\media, `
+      G:\plos-data\paperless\consume, G:\plos-data\paperless\export, `
+      G:\plos-data\plos
 
 # Configure environment.
 copy .env.template .env
@@ -68,7 +68,7 @@ python -m plos.worker
 In another terminal, drop any PDF into the consume folder:
 
 ```powershell
-copy C:\path\to\some.pdf C:\plos-data\paperless\consume\
+copy C:\path\to\some.pdf G:\plos-data\paperless\consume\
 ```
 
 Within ~30 seconds:

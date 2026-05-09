@@ -20,9 +20,9 @@ services:
       PAPERLESS_POST_CONSUME_SCRIPT: /usr/src/paperless/scripts/post_consume_hook.py
       PAPERLESS_URL_PUBLIC: ${PAPERLESS_URL_PUBLIC:-http://localhost:8000}
     volumes:
-      - C:\plos-data\paperless\data:/usr/src/paperless/data
-      - C:\plos-data\paperless\media:/usr/src/paperless/media
-      - C:\plos-data\paperless\consume:/usr/src/paperless/consume
-      - C:\plos-data\paperless\export:/usr/src/paperless/export
-      - C:\plos-data\plos:/usr/src/paperless/plos
+      - G:\plos-data\paperless\data:/usr/src/paperless/data
+      - G:\plos-data\paperless\media:/usr/src/paperless/media
+      - G:\plos-data\paperless\consume:/usr/src/paperless/consume
+      - G:\plos-data\paperless\export:/usr/src/paperless/export
+      - G:\plos-data\plos:/usr/src/paperless/plos
       - ../scripts:/usr/src/paperless/scripts:ro

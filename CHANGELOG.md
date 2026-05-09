@@ -17,7 +17,7 @@ is the baseline and is not enumerated below.
   logs each new document.
 - `scripts/init_db.py` for one-shot schema creation.
 - `docker/docker-compose.yml` for a single-container Paperless setup with
-  the host data tree under `C:\plos-data\`.
+  the host data tree under `G:\plos-data\`.
 - Test suite covering the schema, the worker poll pass, and the hook contract.
 - README "Quickstart" walks through the Phase 1 demo end-to-end.
 
