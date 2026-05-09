@@ -11,10 +11,10 @@ is the baseline and is not enumerated below.
 
 ### Added
 
-- Phase 1 substrate: Paperless-ngx (Docker, SQLite backend, no Redis), the
-  four-table SQLite sidecar schema, the post-consume hook that records
-  ingested documents, and a worker skeleton that polls every 60 seconds and
-  logs each new document.
+- Phase 1 substrate: Paperless-ngx (Docker, SQLite backend) plus a
+  `redis:7-alpine` sidecar, the four-table SQLite sidecar schema, the
+  post-consume hook that records ingested documents, and a worker skeleton
+  that polls every 60 seconds and logs each new document.
 - `python-dotenv` dependency. `scripts/init_db.py` and `python -m plos.worker`
   now load `.env` at startup so `PLOS_DB_PATH` and friends populate
   `os.environ` automatically — no need to export them per shell.
@@ -29,6 +29,11 @@ is the baseline and is not enumerated below.
 
 ### Changed
 
+- Phase 1 substrate now includes a Redis sidecar. The original "no Redis"
+  intent did not survive contact with current Paperless-ngx, which hard-
+  requires Redis for the Django cache and Celery broker. `ARCHITECTURE.md`
+  records Redis as a named exception; `EVOLUTION.md` gains an
+  "Implementation reality" section explaining the correction.
 - Python package layout fixed to match `pyproject.toml`: code now lives at
   `src/plos/` so `pip install -e .` produces an importable `plos` package.
 - `.gitignore` now excludes `.claude/settings.local.json` per the user's

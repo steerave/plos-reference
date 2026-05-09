@@ -1,18 +1,30 @@
 # Paperless-ngx — minimal single-household configuration.
-# Single container, SQLite backend, in-process broker. No Redis, no Postgres.
-# See ARCHITECTURE.md "The four runtime components" for context.
+#
+# Two containers: Paperless itself (SQLite-backed) and a Redis sidecar.
+# Redis is a deliberate, named exception to the "fewer moving parts" rule
+# in ARCHITECTURE.md: current Paperless-ngx (post-2.x) hard-requires Redis
+# for the Django cache and Celery broker — there is no in-process fallback.
+# We keep it as small as possible: alpine image, no auth, no persistent
+# volume (cache and broker state are fine to lose on restart). Postgres is
+# still excluded; SQLite is sufficient for one household.
+#
+# See ARCHITECTURE.md "The four runtime components" for context and
+# EVOLUTION.md for why the original "no Redis" assumption changed.
 
 services:
   paperless:
     image: ghcr.io/paperless-ngx/paperless-ngx:latest
     container_name: plos-paperless
     restart: unless-stopped
+    depends_on:
+      - redis
     ports:
       # Host port is configurable via PAPERLESS_HOST_PORT in .env. Container
       # always listens on 8000 internally. Defaults to 8000:8000.
       - "${PAPERLESS_HOST_PORT:-8000}:8000"
     environment:
       PAPERLESS_DBENGINE: sqlite
+      PAPERLESS_REDIS: redis://redis:6379
       PAPERLESS_TIME_ZONE: America/Chicago
       PAPERLESS_OCR_LANGUAGE: eng
       PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER}
@@ -28,3 +40,11 @@ services:
       - G:\plos-data\paperless\export:/usr/src/paperless/export
       - G:\plos-data\plos:/usr/src/paperless/plos
       - ../scripts:/usr/src/paperless/scripts:ro
+
+  redis:
+    image: redis:7-alpine
+    container_name: plos-redis
+    restart: unless-stopped
+    # No port published to the host — Paperless reaches Redis on the
+    # internal Docker network at redis:6379. No volume — the cache and
+    # Celery broker state are intentionally ephemeral.

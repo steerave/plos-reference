@@ -10,6 +10,8 @@
 
 A new section, "v2.5 — the compilation hybrid," is appended after the existing v1 → v2 narrative. It documents a refinement to v2's M3 decision (Dataview at view-time over pre-computation): the default holds, but three named exceptions are introduced where synthesis genuinely exceeds aggregation. The original v1 → v2 history is unchanged, including its lessons.
 
+A short "Implementation reality" section is appended at the end, capturing one assumption that did not survive contact with the vendor stack: the original "single-container Paperless, no Redis" intent was rewritten during Phase 1 build because current Paperless-ngx hard-requires Redis with no in-process fallback. The architecture absorbs Redis as a named exception rather than re-litigating the rule.
+
 ---
 
 ## Why this document exists
@@ -203,3 +205,19 @@ Two clarifications worth stating directly.
 This isn't a confession that v1 was wrong. v1 was internally coherent and would have produced a working system. The shift to v2 is not a correction of errors — it's a reframing once new constraints (portfolio purpose, privacy boundary, realistic maintenance budget) became visible. v1's decisions log preserved its rationale carefully, and that rationale isn't invalidated retroactively. It just stopped being load-bearing once the goals shifted. The same applies to the v2 → v2.5 shift: v2 was coherent and would have worked; v2.5 refines a load-bearing rule into a load-bearing principle, and the work v2 did is preserved in v2.5 unchanged.
 
 This isn't a final architecture. v2.5 will face its own pressure as the system gets built and used. If a v3 emerges from real usage data, this document gets a new section. The point of recording iteration is to make the next iteration easier, not to declare the current one finished.
+
+---
+
+## Implementation reality — assumptions corrected during build
+
+Architecture documents are written before the code runs. Some assumptions hold; others meet the vendor stack and lose. This section records corrections made during build so the design and the running system stay honest with each other.
+
+### The "no Redis" assumption did not survive contact with current Paperless-ngx
+
+The original substrate intent (carried in the docker-compose comment header through Phase 1's first commit) was *"single container, SQLite backend, in-process broker. No Redis, no Postgres."* That framing was load-bearing for the "subtraction over addition" principle: every additional moving part has to earn its keep, and a cache server for a one-household document pipeline reads as overkill.
+
+It turned out to be wrong about Paperless. Current Paperless-ngx (2.x and later) requires Redis unconditionally — Django's cache backend, Celery's task broker, and the post-migrate signal handlers in upstream dependencies all hit `localhost:6379` during boot, with no flag to disable or substitute an in-process alternative. The container fails to finish migrations without a reachable Redis. This was discovered during Phase 1 verification, not during design.
+
+The fix preserves the spirit of the original constraint while accepting the vendor reality: a small `redis:7-alpine` sidecar is added to docker-compose, with no auth, no published port, and no persistent volume — cache and broker state are intentionally ephemeral. From PLOS's perspective Paperless remains one logical component; the Redis container is an implementation detail of *running* Paperless, not a thing PLOS code interacts with. Postgres is still excluded — SQLite is sufficient for one household, and that part of the original intent does hold up.
+
+The lesson is small but worth naming. *Vendor stacks have hard requirements that aren't always visible in their docs until you boot them.* "Subtraction over addition" works as a design principle, but it can't be enforced against requirements you don't control. The right response is to absorb the new component as a named exception (which is what `ARCHITECTURE.md` and the docker-compose comment header now do), not to fight the upstream project or pin to an end-of-life version.

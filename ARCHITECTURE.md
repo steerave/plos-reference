@@ -38,7 +38,7 @@ Four principles shape every decision in this document.
 
 At runtime, only four things are running:
 
-1. **Paperless-ngx**, in Docker, watching a consume folder, performing OCR, archiving originals, exposing a REST API.
+1. **Paperless-ngx**, in Docker, watching a consume folder, performing OCR, archiving originals, exposing a REST API. Paperless requires a Redis sidecar (Django cache and Celery broker); a small `redis:7-alpine` container runs alongside it. Redis is a named exception to the "fewer moving parts" preference — current Paperless-ngx provides no in-process fallback. PLOS code does not talk to Redis directly; from PLOS's perspective Paperless is still one logical component.
 2. **A background worker** (`worker.py`), polling SQLite every 60 seconds for new jobs, extracting fields, writing additively to vault frontmatter over SMB.
 3. **Obsidian**, on the user's machine, reading the vault as plain markdown. The Dataview plugin is required for the dashboard layer; cross-entity views render as Dataview query results inside markdown files under `dashboards/`.
 4. **Claude Code**, run in two modes. *Scheduled compile passes* regenerate the three compiled artifacts on their cadences: `this-week.md` daily, `anomalies.md` monthly, `tax-prep.md` weekly during tax season and monthly otherwise. *Ad-hoc sessions* are opened occasionally to drain queued documents the graduated extractors don't cover, to create entity files for unmatched correspondents, and to answer ad-hoc analytical questions against the captured data.
