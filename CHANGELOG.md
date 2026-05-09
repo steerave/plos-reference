@@ -15,6 +15,9 @@ is the baseline and is not enumerated below.
   four-table SQLite sidecar schema, the post-consume hook that records
   ingested documents, and a worker skeleton that polls every 60 seconds and
   logs each new document.
+- `python-dotenv` dependency. `scripts/init_db.py` and `python -m plos.worker`
+  now load `.env` at startup so `PLOS_DB_PATH` and friends populate
+  `os.environ` automatically — no need to export them per shell.
 - `scripts/init_db.py` for one-shot schema creation.
 - `docker/docker-compose.yml` for a single-container Paperless setup with
   the host data tree under `G:\plos-data\`.

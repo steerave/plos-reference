@@ -9,10 +9,13 @@ from __future__ import annotations
 import os
 import sys
 
+from dotenv import load_dotenv
+
 from plos import db
 
 
 def main() -> int:
+    load_dotenv()
     path = os.environ.get("PLOS_DB_PATH")
     if not path:
         print("PLOS_DB_PATH is not set — copy .env.template to .env and edit", file=sys.stderr)

@@ -29,6 +29,9 @@ dependencies = [
     # Phase 1: Paperless-ngx is consumed via its REST API; requests is the only runtime dep.
     "requests>=2.31",
     "pyyaml>=6.0",
+    # Loads the gitignored .env file at process startup so PLOS_DB_PATH and
+    # friends are available to init_db.py and the worker.
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

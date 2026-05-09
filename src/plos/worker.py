@@ -14,6 +14,8 @@ import sqlite3
 import sys
 import time
 
+from dotenv import load_dotenv
+
 from . import db
 
 logger = logging.getLogger("plos.worker")
@@ -41,6 +43,7 @@ def run_one_pass(conn: sqlite3.Connection) -> int:
 
 
 def main() -> None:
+    load_dotenv()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
