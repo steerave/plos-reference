@@ -27,3 +27,6 @@ is the baseline and is not enumerated below.
   `src/plos/` so `pip install -e .` produces an importable `plos` package.
 - `.gitignore` now excludes `.claude/settings.local.json` per the user's
   global standards.
+- README Quickstart rewritten as numbered steps with explicit working
+  directory ("Where:") and rationale ("Why:") for each step, including
+  notes on which commands are single multi-line statements vs. one-at-a-time.
