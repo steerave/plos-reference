@@ -8,7 +8,9 @@ services:
     container_name: plos-paperless
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      # Host port is configurable via PAPERLESS_HOST_PORT in .env. Container
+      # always listens on 8000 internally. Defaults to 8000:8000.
+      - "${PAPERLESS_HOST_PORT:-8000}:8000"
     environment:
       PAPERLESS_DBENGINE: sqlite
       PAPERLESS_TIME_ZONE: America/Chicago

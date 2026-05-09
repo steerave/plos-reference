@@ -78,7 +78,11 @@ Open `.env` in any text editor and set values for:
 - `PAPERLESS_ADMIN_PASSWORD` — pick a password.
 - `PAPERLESS_SECRET_KEY` — 50+ random characters. Paperless uses it to sign session cookies.
 
-**Why:** Paperless reads these on first boot to create your admin login. The container will fail to start if `PAPERLESS_SECRET_KEY` is missing or trivially short.
+**Optional but common:**
+
+- `PAPERLESS_HOST_PORT` — host port Paperless is published on. Defaults to `8000`. Change it (e.g. to `8888`) if `8000` is already in use on your machine. If you change it, also update `PAPERLESS_URL_PUBLIC` to match (e.g. `http://localhost:8888`) so Paperless's CSRF protection accepts requests from the browser URL.
+
+**Why:** Paperless reads these on first boot to create your admin login. The container will fail to start if `PAPERLESS_SECRET_KEY` is missing or trivially short. The host-port knob lets you avoid collisions with anything else already bound to `8000`.
 
 #### Step 5 — Install Python dependencies and initialize the SQLite schema
 
@@ -112,7 +116,7 @@ docker compose -f docker\docker-compose.yml --env-file .env up -d
 
 #### Step 7 — Verify Paperless is up
 
-Open <http://localhost:8000> in a browser and log in with the credentials you set in Step 4. You should see an empty document list.
+Open `http://localhost:<PAPERLESS_HOST_PORT>` in a browser — `http://localhost:8000` if you kept the default, or whatever port you set in Step 4. Log in with the credentials you set in Step 4. You should see an empty document list.
 
 **Why:** Confirms Paperless booted, the secret key is valid, and your admin account exists. If the page won't load, check `docker compose -f docker\docker-compose.yml logs paperless`.
 
@@ -151,7 +155,7 @@ Replace `C:\path\to\some.pdf` with the path to any real PDF on your machine.
 
 Within ~30 seconds, all three should be true:
 
-1. **In Paperless (browser at <http://localhost:8000>)** — the document appears in the document list, OCR'd.
+1. **In Paperless (browser at `http://localhost:<PAPERLESS_HOST_PORT>`)** — the document appears in the document list, OCR'd.
 2. **In SQLite (`G:\plos-data\plos\plos.db`)** — a new row in the `documents` table with `status='new'`, then `'done'`.
 3. **In Terminal A (the worker)** — a log line of the form `new document id=1 paperless_id=1 title='some.pdf'`.
 

@@ -18,6 +18,9 @@ is the baseline and is not enumerated below.
 - `python-dotenv` dependency. `scripts/init_db.py` and `python -m plos.worker`
   now load `.env` at startup so `PLOS_DB_PATH` and friends populate
   `os.environ` automatically — no need to export them per shell.
+- `PAPERLESS_HOST_PORT` env var lets you publish Paperless on a host port
+  other than `8000` (e.g. `8888`) without editing `docker-compose.yml`.
+  Defaults to `8000`; pair with a matching `PAPERLESS_URL_PUBLIC`.
 - `scripts/init_db.py` for one-shot schema creation.
 - `docker/docker-compose.yml` for a single-container Paperless setup with
   the host data tree under `G:\plos-data\`.
