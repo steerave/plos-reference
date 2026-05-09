@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Obsidian
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/graph.json
+.trash/
+
+# PLOS — local data and runtime artifacts
+*.db
+*.sqlite
+*.sqlite3
+paperless/consume/
+paperless/media/
+paperless/data/
+*.log
+logs/
+
+# Secrets and local config
+.env
+.env.local
+*.local
+config.local.*
+
+# Real vault data — should never land in this public repo
+real-vault/
+private/
