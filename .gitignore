@@ -74,6 +74,9 @@ logs/
 *.local
 config.local.*
 
+# Claude Code per-project state
+.claude/settings.local.json
+
 # Real vault data — should never land in this public repo
 real-vault/
 private/

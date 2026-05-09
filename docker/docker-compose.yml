@@ -1,0 +1,28 @@
+# Paperless-ngx — minimal single-household configuration.
+# Single container, SQLite backend, in-process broker. No Redis, no Postgres.
+# See ARCHITECTURE.md "The four runtime components" for context.
+
+services:
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:latest
+    container_name: plos-paperless
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PAPERLESS_DBENGINE: sqlite
+      PAPERLESS_TIME_ZONE: America/Chicago
+      PAPERLESS_OCR_LANGUAGE: eng
+      PAPERLESS_ADMIN_USER: ${PAPERLESS_ADMIN_USER}
+      PAPERLESS_ADMIN_PASSWORD: ${PAPERLESS_ADMIN_PASSWORD}
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY}
+      PAPERLESS_URL: ${PAPERLESS_URL_PUBLIC:-http://localhost:8000}
+      PAPERLESS_POST_CONSUME_SCRIPT: /usr/src/paperless/scripts/post_consume_hook.py
+      PAPERLESS_URL_PUBLIC: ${PAPERLESS_URL_PUBLIC:-http://localhost:8000}
+    volumes:
+      - C:\plos-data\paperless\data:/usr/src/paperless/data
+      - C:\plos-data\paperless\media:/usr/src/paperless/media
+      - C:\plos-data\paperless\consume:/usr/src/paperless/consume
+      - C:\plos-data\paperless\export:/usr/src/paperless/export
+      - C:\plos-data\plos:/usr/src/paperless/plos
+      - ../scripts:/usr/src/paperless/scripts:ro
