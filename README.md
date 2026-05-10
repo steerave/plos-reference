@@ -216,7 +216,7 @@ You should see a startup line like `worker started — polling every 60s, vault_
 
 #### Action 1 — drop the sample electric bill
 
-Drag `tests\fixtures\sample_bills\electric_acme_2026_04.pdf` into `G:\plos-data\paperless\consume\`. (Or run `python tests\fixtures\sample_bills\build.py` first to regenerate it from scratch.) The bill is for Acme Power & Light, account `ACCT-12345`, $142.37 due 2026-04-30, 850 kWh — the same account number the sample property at `examples/sample-vault/source/properties/123-main-davenport/index.md` already declares.
+Drag `tests\fixtures\sample_documents\electric_acme_2026_04.pdf` into `G:\plos-data\paperless\consume\`. (Or run `python tests\fixtures\sample_documents\build.py` first to regenerate it from scratch.) The bill is for Acme Power & Light, account `ACCT-12345`, $142.37 due 2026-04-30, 850 kWh — the same account number the sample property at `examples/sample-vault/source/properties/123-main-davenport/index.md` already declares.
 
 #### Action 2 — watch the worker pick it up
 
@@ -249,7 +249,7 @@ Same setup as Phase 2 — Paperless + Redis + worker + the sample vault. The new
 
 #### Action — drop the sample mortgage statement
 
-Drag `tests\fixtures\sample_bills\mortgage_mrcooper_2026_04.pdf` into `G:\plos-data\paperless\consume\`. (Or run `python tests\fixtures\sample_bills\build.py` to regenerate it from scratch — output is byte-deterministic so re-running is safe.) The statement is for Mr. Cooper, loan number `LN-9912345`, principal balance $284,237.18, total amount due $2,452.72, statement date 2026-04-15 — the same loan number the sample property declares as `mortgage_loan_number` in its frontmatter.
+Drag `tests\fixtures\sample_documents\mortgage_mrcooper_2026_04.pdf` into `G:\plos-data\paperless\consume\`. (Or run `python tests\fixtures\sample_documents\build.py` to regenerate it from scratch — output is byte-deterministic so re-running is safe.) The statement is for Mr. Cooper, loan number `LN-9912345`, principal balance $284,237.18, total amount due $2,452.72, statement date 2026-04-15 — the same loan number the sample property declares as `mortgage_loan_number` in its frontmatter.
 
 ### What success looks like
 
@@ -270,7 +270,7 @@ This slice introduces the first **account** entity and the second new dashboard.
 
 #### Action — drop the sample bank statement
 
-Drag `tests\fixtures\sample_bills\bank_first_davenport_2026_04.pdf` into `G:\plos-data\paperless\consume\`. The statement is for First Davenport Bank, account `ACCT-4521` (the checking account at `examples/sample-vault/source/accounts/first-davenport-checking-4521/index.md`), statement period 2026-03-16 → 2026-04-15, ending balance $16,529.74.
+Drag `tests\fixtures\sample_documents\bank_first_davenport_2026_04.pdf` into `G:\plos-data\paperless\consume\`. The statement is for First Davenport Bank, account `ACCT-4521` (the checking account at `examples/sample-vault/source/accounts/first-davenport-checking-4521/index.md`), statement period 2026-03-16 → 2026-04-15, ending balance $16,529.74.
 
 ### What success looks like
 
@@ -289,7 +289,7 @@ This slice introduces the first **person** entity — `examples/sample-vault/sou
 
 #### Action — drop the sample pay stub
 
-Drag `tests\fixtures\sample_bills\paystub_beacon_2026_04.pdf` into `G:\plos-data\paperless\consume\`. The stub is for *Joe Sample* employed at *Beacon Software*, period ending 2026-04-14, gross $4,615.38, net $3,145.28, YTD gross $36,923.04. The same `legal_name` + `employer_current` pair appears on the new sample person record.
+Drag `tests\fixtures\sample_documents\paystub_beacon_2026_04.pdf` into `G:\plos-data\paperless\consume\`. The stub is for *Joe Sample* employed at *Beacon Software*, period ending 2026-04-14, gross $4,615.38, net $3,145.28, YTD gross $36,923.04. The same `legal_name` + `employer_current` pair appears on the new sample person record.
 
 ### What success looks like
 

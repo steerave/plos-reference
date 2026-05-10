@@ -4,7 +4,7 @@ Deterministically generate the sample document PDFs used by the
 phase-by-phase demos and the test suite.
 
 Run from the repo root to produce all fixtures:
-    python tests/fixtures/sample_bills/build.py
+    python tests/fixtures/sample_documents/build.py
 
 Each generator below writes one PDF with reproducible bytes (no
 embedded timestamps), so re-running this script during CI or refactors

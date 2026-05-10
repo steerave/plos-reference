@@ -248,7 +248,7 @@ Phase 3 fictional providers (all kept in the public reference repo):
   net $3,145.28, YTD gross $36,923.04. Routes to the new person
   `joe`.
 
-The sample-bill builder at `tests/fixtures/sample_bills/build.py`
+The sample-document builder at `tests/fixtures/sample_documents/build.py`
 emits all four PDFs (Phase 2 + Phase 3) deterministically — reportlab
 is invoked with `invariant=1` so re-running the script produces
 byte-identical PDFs and `git diff` stays quiet between regenerations.
@@ -265,10 +265,6 @@ doesn't read them as gaps:
   shows the latest only. A "cash-flow over N months" dashboard
   requires a backlog of statements per account; Phase 3 ships one
   per account.
-- **`tests/fixtures/sample_bills/` rename.** The folder name is now
-  misleading (it holds mortgage statements, bank statements, and pay
-  stubs alongside the original electric bill). Defer to a Phase 4
-  housekeeping commit.
 - **`_review/queue.md` rendering.** Phase 5 work; Phase 3's
   `needs_review` rows live in SQLite only.
 - **Schema files in `_schema/`.** Still empty. Frontmatter conventions
