@@ -7,15 +7,20 @@ whitespace-tolerant regex. Returns None if the provider header is
 absent OR if amount/due-date can't be parsed (provider matched but
 body unrecognizable — better to bail than to return a half-extracted
 record the worker would write into the vault).
+
+`route` locates the property whose `electric_account` frontmatter
+matches the account number this extractor pulled.
 """
 
 from __future__ import annotations
 
 import re
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any
 
-from plos.extractors.registry import DocumentMeta
+from plos import entities
+from plos.extractors.registry import DocumentMeta, RouteResult
 
 PROVIDER = "Acme Power & Light"
 
@@ -82,3 +87,14 @@ def _account(text: str) -> str | None:
     if not m:
         return None
     return m.group(1)
+
+
+def route(fields: dict[str, Any], vault_root: Path) -> RouteResult:
+    """Find the property entity whose electric_account matches the bill."""
+    account = fields.get("electric_account")
+    if not account:
+        return RouteResult(path=None, missing_key=True)
+    return RouteResult(
+        path=entities.find_property_by_electric_account(account, vault_root),
+        missing_key=False,
+    )

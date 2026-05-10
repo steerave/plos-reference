@@ -130,5 +130,35 @@ def test_omits_kwh_when_unparseable(doc):
 
 def test_registered_in_global_registry():
     """Sanity check: the extractor is wired into registry.EXTRACTORS."""
-    names = [name for name, _ in registry.EXTRACTORS]
+    names = [name for name, _module in registry.EXTRACTORS]
     assert "graduated:utility_bill_electric" in names
+
+
+def test_route_returns_property_path_for_known_account(tmp_path):
+    """End-to-end of route(): given fields with a known electric_account,
+    locates the matching property's index.md."""
+    folder = tmp_path / "source" / "properties" / "123-main-davenport"
+    folder.mkdir(parents=True)
+    (folder / "index.md").write_text(
+        "---\nentity: property\nelectric_account: ACCT-12345\n---\n",
+        encoding="utf-8",
+    )
+    fields = {"electric_account": "ACCT-12345"}
+    result = utility_bill_electric.route(fields, tmp_path)
+    assert result.missing_key is False
+    assert result.path is not None
+    assert result.path.parent.name == "123-main-davenport"
+
+
+def test_route_signals_missing_key_when_account_absent(tmp_path):
+    result = utility_bill_electric.route({}, tmp_path)
+    assert result.missing_key is True
+    assert result.path is None
+
+
+def test_route_returns_unmatched_when_no_property_has_account(tmp_path):
+    (tmp_path / "source" / "properties").mkdir(parents=True)
+    fields = {"electric_account": "ACCT-XX"}
+    result = utility_bill_electric.route(fields, tmp_path)
+    assert result.missing_key is False
+    assert result.path is None

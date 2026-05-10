@@ -37,7 +37,7 @@ def conn(tmp_path):
 
 @pytest.fixture
 def vault(tmp_path):
-    """Build a tmp vault with one property keyed to ACCT-12345."""
+    """Build a tmp vault with one property keyed to ACCT-12345 and LN-9912345."""
     folder = tmp_path / "vault" / "source" / "properties" / "123-main-davenport"
     folder.mkdir(parents=True)
     (folder / "index.md").write_text(
@@ -47,6 +47,7 @@ def vault(tmp_path):
         "slug: 123-main-davenport\n"
         "address: 123 Main St, Davenport, IA 52801\n"
         "electric_account: ACCT-12345\n"
+        "mortgage_loan_number: LN-9912345\n"
         "locked_fields: []\n"
         "---\n\n"
         "# 123 Main St, Davenport, IA\n",
@@ -94,6 +95,15 @@ SAMPLE_BILL = (
     "Energy used this period: 850 kWh\n"
     "Amount due: $142.37\n"
     "Due date: April 30, 2026\n"
+)
+
+
+SAMPLE_MORTGAGE_STATEMENT = (
+    "Mr. Cooper\n"
+    "Loan number: LN-9912345\n"
+    "Statement date: 2026-04-15\n"
+    "Principal balance: $284,237.18\n"
+    "Total amount due: $2,452.72\n"
 )
 
 
@@ -278,6 +288,51 @@ def test_document_date_left_alone_when_api_has_none(conn, vault):
         "SELECT document_date FROM documents WHERE paperless_id=1"
     ).fetchone()
     assert row["document_date"] == "2026-04-15"
+
+
+@responses.activate
+def test_mortgage_statement_routes_to_property_via_loan_number(conn, vault, caplog):
+    """Mr. Cooper statement extractor + entity matcher land mortgage fields
+    on the same property the electric extractor would, via a different
+    routing key (loan number instead of electric account)."""
+    _insert(conn, 7, document_date="2026-04-15", correspondent="Mr. Cooper")
+    _mock_document(7, SAMPLE_MORTGAGE_STATEMENT)
+
+    with caplog.at_level(logging.INFO, logger="plos.worker"):
+        worker.run_one_pass(conn, vault)
+
+    doc = conn.execute(
+        "SELECT status, document_type FROM documents WHERE paperless_id=7"
+    ).fetchone()
+    assert doc["status"] == "done"
+    assert doc["document_type"] == "mortgage_statement_mr_cooper"
+
+    property_path = (
+        vault / "source" / "properties" / "123-main-davenport" / "index.md"
+    )
+    text = property_path.read_text(encoding="utf-8")
+    assert "last_mortgage_statement_amount: 2452.72" in text
+    assert "last_mortgage_statement_principal_balance: 284237.18" in text
+    assert "mortgage_loan_number: LN-9912345" in text
+
+    rows = conn.execute(
+        "SELECT field_name, handler FROM extracted_fields WHERE document_id = ?",
+        (
+            conn.execute("SELECT id FROM documents WHERE paperless_id=7").fetchone()[
+                "id"
+            ],
+        ),
+    ).fetchall()
+    field_names = {r["field_name"] for r in rows}
+    assert {
+        "last_mortgage_statement_amount",
+        "last_mortgage_statement_principal_balance",
+        "last_mortgage_statement_date",
+        "last_mortgage_statement_url",
+        "mortgage_loan_number",
+    } <= field_names
+    for r in rows:
+        assert r["handler"] == "graduated:mortgage_statement_mr_cooper"
 
 
 def test_vault_root_required_in_main(monkeypatch):

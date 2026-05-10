@@ -9,6 +9,7 @@ purpose: primary-residence
 owners:
   - joe
 mortgage_servicer_current: Mr. Cooper
+mortgage_loan_number: LN-9912345
 insurance_carrier_current: State Farm
 hoa: false
 electric_account: ACCT-12345

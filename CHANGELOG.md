@@ -9,6 +9,50 @@ is the baseline and is not enumerated below.
 
 ## [Unreleased]
 
+### Added
+
+- **Phase 3 Slice 1 — Mr. Cooper mortgage statement extractor.** Second
+  graduated extractor (`src/plos/extractors/graduated/mortgage_statement_mr_cooper.py`)
+  recognises a Mr. Cooper monthly statement and routes it to the matching
+  property via a new `mortgage_loan_number` frontmatter field. The
+  property dashboard at `examples/sample-vault/dashboards/properties.md`
+  gains a second table for the latest mortgage statement per property.
+  A new sample fixture (`tests/fixtures/sample_bills/mortgage_mrcooper_2026_04.pdf`)
+  ships with the demo bundle.
+- New entity matcher `entities.find_property_by_mortgage_loan_number()`
+  alongside the existing electric-account matcher. Both go through a
+  small shared `_find_in()` helper.
+- README quickstart gains a "Phase 3 Slice 1 (mortgage statement)"
+  section walking the demo end-to-end.
+
+### Changed
+
+- **Worker dispatch is now generic over extractor + routing key.** Every
+  extractor module under `src/plos/extractors/graduated/` now exports
+  both `extract(text, doc) -> dict | None` and
+  `route(fields, vault_root) -> RouteResult`. The worker calls
+  `module.route(...)` instead of any hardcoded matcher. A new
+  `RouteResult(path, missing_key)` named tuple distinguishes
+  "extractor matched but routing key wasn't extracted" from
+  "routing key extracted but no entity in the vault matches it".
+- `EXTRACTORS` is now a list of `(handler_name, module)` tuples;
+  `dispatch` returns `(handler, module, fields)`. Adding a new extractor
+  is still one import + one tuple entry; the only widening is that the
+  module must now expose `route` alongside `extract`.
+- The "no_account_in_extraction" review reason was generalised to
+  `no_routing_key_in_extraction` since the registry now covers more
+  than electric-account routing.
+- The worker's `_ensure_property_entity` is now `_ensure_entity(conn,
+  entity_type, domain, slug, wiki_path)`. Entity type and domain are
+  derived from the matched index.md path via a small `_ENTITY_TYPE_FROM_DIR`
+  mapping (`properties` -> property/properties, `accounts` -> account/finance,
+  etc.) — Slice 2 and Slice 3 plug into this without further worker change.
+- `tests/fixtures/sample_bills/build.py` now passes `invariant=1` to
+  reportlab so regenerated PDFs are byte-deterministic across runs and
+  `git diff` stays quiet between fixture rebuilds.
+- The reference repo's sample property gains a `mortgage_loan_number`
+  frontmatter field so the demo can route the new fixture against it.
+
 ### Fixed
 
 - **Phase 3-0:** worker now refreshes `documents.document_date` from the

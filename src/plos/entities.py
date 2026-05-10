@@ -2,12 +2,11 @@
 Entity matching — map an extracted field value back to the entity record
 (an `index.md` file) it belongs to.
 
-Phase 2's only matcher routes electric bills to a property by its
-`electric_account` frontmatter field. Phase 3+ will add matchers for
-other utility account numbers, mortgage loan numbers, vehicle VINs,
-etc. Each matcher walks the relevant `source/<type>/` subtree, parses
-each `index.md`'s YAML frontmatter, and returns the first matching
-file's path.
+Each matcher walks the relevant `source/<type>/` subtree, parses each
+`index.md`'s YAML frontmatter, and returns the first matching file's
+path. Phase 2 added the electric-account matcher; Phase 3 adds matchers
+for mortgage loan numbers, bank account numbers, and pay-stub
+employee/employer combinations.
 
 The matchers are deliberately stateless — no in-memory cache, no SQLite
 mirror. The vault is the source of truth (ARCHITECTURE design principle
@@ -42,18 +41,33 @@ def _read_frontmatter(path: Path) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def find_property_by_electric_account(account: str, vault_root: Path) -> Path | None:
-    """Return the path of the property index.md whose electric_account matches.
-
-    Walks vault_root/source/properties/*/index.md. Returns the first match
-    in lexicographic order, or None if no property has a matching account
-    (or the properties directory doesn't exist).
-    """
-    properties_dir = vault_root / "source" / "properties"
-    if not properties_dir.is_dir():
+def _find_in(
+    vault_root: Path, subdir: str, predicate
+) -> Path | None:
+    """Return the first index.md under `vault_root/source/<subdir>/` matching predicate."""
+    folder = vault_root / "source" / subdir
+    if not folder.is_dir():
         return None
-    for index_path in sorted(properties_dir.glob("*/index.md")):
+    for index_path in sorted(folder.glob("*/index.md")):
         fm = _read_frontmatter(index_path)
-        if fm.get("electric_account") == account:
+        if predicate(fm):
             return index_path
     return None
+
+
+def find_property_by_electric_account(account: str, vault_root: Path) -> Path | None:
+    """Return the property whose electric_account frontmatter equals `account`."""
+    return _find_in(
+        vault_root, "properties", lambda fm: fm.get("electric_account") == account
+    )
+
+
+def find_property_by_mortgage_loan_number(
+    loan_number: str, vault_root: Path
+) -> Path | None:
+    """Return the property whose mortgage_loan_number frontmatter equals `loan_number`."""
+    return _find_in(
+        vault_root,
+        "properties",
+        lambda fm: fm.get("mortgage_loan_number") == loan_number,
+    )

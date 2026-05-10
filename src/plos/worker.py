@@ -32,12 +32,24 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from . import db, entities, paperless, vault
+from . import db, paperless, vault
 from .extractors import registry
 
 logger = logging.getLogger("plos.worker")
 
 DEFAULT_POLL_SECONDS = 60
+
+# Maps the source/<dir>/ name to (entities.type, entities.domain) for
+# upserting into the `entities` table when a document is matched. Adding
+# a new entity type means one entry here plus one extractor module that
+# routes into it.
+_ENTITY_TYPE_FROM_DIR: dict[str, tuple[str, str]] = {
+    "properties": ("property", "properties"),
+    "accounts": ("account", "finance"),
+    "people": ("person", "family"),
+    "vehicles": ("vehicle", "vehicles"),
+    "organizations": ("organization", "organizations"),
+}
 
 
 def _parse_date(value) -> date | None:
@@ -68,10 +80,14 @@ def _api_document_date(doc: dict) -> date | None:
     return _parse_date(doc.get("created"))
 
 
-def _ensure_property_entity(
-    conn: sqlite3.Connection, slug: str, wiki_path: str
+def _ensure_entity(
+    conn: sqlite3.Connection,
+    entity_type: str,
+    domain: str,
+    slug: str,
+    wiki_path: str,
 ) -> int:
-    """Upsert and return entities.id for this property."""
+    """Upsert and return entities.id for the given slug."""
     existing = conn.execute(
         "SELECT id FROM entities WHERE slug = ?", (slug,)
     ).fetchone()
@@ -79,9 +95,21 @@ def _ensure_property_entity(
         return existing["id"]
     cursor = conn.execute(
         "INSERT INTO entities (type, domain, slug, wiki_path) VALUES (?, ?, ?, ?)",
-        ("property", "properties", slug, wiki_path),
+        (entity_type, domain, slug, wiki_path),
     )
     return cursor.lastrowid
+
+
+def _entity_type_for(entity_path: Path, vault_root: Path) -> tuple[str, str]:
+    """Derive (entity_type, domain) from a matched index.md path.
+
+    Path shape is `vault_root/source/<dir>/<slug>/index.md`. The dir
+    name maps to a pair via `_ENTITY_TYPE_FROM_DIR`.
+    """
+    rel = entity_path.relative_to(vault_root).parts
+    if len(rel) < 3 or rel[0] != "source":
+        raise ValueError(f"unexpected entity path: {entity_path}")
+    return _ENTITY_TYPE_FROM_DIR[rel[1]]
 
 
 def _process_document(
@@ -116,40 +144,39 @@ def _process_document(
         )
         return
 
-    handler, fields = result
-    account = fields.get("electric_account")
-    if not account:
+    handler, module, fields = result
+    route_result = module.route(fields, vault_root)
+    if route_result.missing_key:
         conn.execute(
             "UPDATE documents SET status='needs_review', review_reason=? WHERE id=?",
-            ("no_account_in_extraction", row["id"]),
+            ("no_routing_key_in_extraction", row["id"]),
         )
         logger.info(
-            "matched but no account id=%s extractor=%s status=needs_review",
+            "matched but routing key missing id=%s extractor=%s status=needs_review",
             row["id"],
             handler,
         )
         return
-
-    property_path = entities.find_property_by_electric_account(account, vault_root)
-    if property_path is None:
+    if route_result.path is None:
         conn.execute(
             "UPDATE documents SET status='needs_review', review_reason=? WHERE id=?",
             ("unmatched_entity", row["id"]),
         )
         logger.info(
-            "unmatched entity id=%s extractor=%s account=%s status=needs_review",
+            "unmatched entity id=%s extractor=%s status=needs_review",
             row["id"],
             handler,
-            account,
         )
         return
 
+    entity_path: Path = route_result.path
     source_doc_date = document_date or date.today()
-    changed = vault.merge_frontmatter(property_path, fields, source_doc_date)
+    changed = vault.merge_frontmatter(entity_path, fields, source_doc_date)
 
-    slug = property_path.parent.name
-    wiki_path = str(property_path.relative_to(vault_root)).replace("\\", "/")
-    entity_id = _ensure_property_entity(conn, slug, wiki_path)
+    slug = entity_path.parent.name
+    wiki_path = str(entity_path.relative_to(vault_root)).replace("\\", "/")
+    entity_type, domain = _entity_type_for(entity_path, vault_root)
+    entity_id = _ensure_entity(conn, entity_type, domain, slug, wiki_path)
     for field_name, field_value in fields.items():
         conn.execute(
             "INSERT INTO extracted_fields "
@@ -165,12 +192,13 @@ def _process_document(
             ),
         )
 
+    document_type = handler.split(":", 1)[1] if ":" in handler else handler
     conn.execute(
-        "UPDATE documents SET status='done', document_type='utility_bill_electric' WHERE id=?",
-        (row["id"],),
+        "UPDATE documents SET status='done', document_type=? WHERE id=?",
+        (document_type, row["id"]),
     )
     logger.info(
-        "extracted id=%s paperless_id=%s extractor=%s property=%s changed=%s status=done",
+        "extracted id=%s paperless_id=%s extractor=%s entity=%s changed=%s status=done",
         row["id"],
         row["paperless_id"],
         handler,

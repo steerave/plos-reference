@@ -241,7 +241,28 @@ Three places to check:
 2. **In Obsidian, on `examples/sample-vault/dashboards/properties.md`** — the Dataview table renders one row for the property, with the bill amount, kWh, and a clickable Source link back to Paperless.
 3. **In SQLite** — `extracted_fields` has five rows for the bill (one per extracted field), each with `handler='graduated:utility_bill_electric'`. The `entities` table has a row for `123-main-davenport`.
 
-That's the Phase 2 demo. Phase 3 will add gas, water, and internet extractors plus mortgage statements and pay stubs, and Phase 4 introduces the first compiled artifact (`this-week.md`).
+That's the Phase 2 demo. Phase 3 adds mortgage statements, bank statements, and pay stubs — each in its own vertical slice with its own demo. Phase 4 introduces the first compiled artifact (`this-week.md`).
+
+## Quickstart — Phase 3 Slice 1 (mortgage statement)
+
+Same setup as Phase 2 — Paperless + Redis + worker + the sample vault. The new extractor is wired into the registry alongside the electric one, so the running worker picks it up automatically (restart not required if it was started after the slice landed).
+
+#### Action — drop the sample mortgage statement
+
+Drag `tests\fixtures\sample_bills\mortgage_mrcooper_2026_04.pdf` into `G:\plos-data\paperless\consume\`. (Or run `python tests\fixtures\sample_bills\build.py` to regenerate it from scratch — output is byte-deterministic so re-running is safe.) The statement is for Mr. Cooper, loan number `LN-9912345`, principal balance $284,237.18, total amount due $2,452.72, statement date 2026-04-15 — the same loan number the sample property declares as `mortgage_loan_number` in its frontmatter.
+
+### What success looks like
+
+1. **In the property's `index.md`** — `examples/sample-vault/source/properties/123-main-davenport/index.md` frontmatter now also has:
+   - `last_mortgage_statement_amount: 2452.72`
+   - `last_mortgage_statement_principal_balance: 284237.18`
+   - `last_mortgage_statement_date: 2026-04-15`
+   - `last_mortgage_statement_url: http://localhost:8888/documents/<M>/`
+   - `data_effective_date` advances to 2026-04-15 (or stays at the most recent ingested document's date, whichever is later — see the merge contract in `CONVENTIONS.md`).
+2. **In Obsidian, on `examples/sample-vault/dashboards/properties.md`** — the dashboard now has two tables. The mortgage table renders a row for `123-main-davenport` with the servicer, total due, principal balance, and a Source link back to Paperless.
+3. **In SQLite** — `extracted_fields` gains five new rows for the mortgage statement, each with `handler='graduated:mortgage_statement_mr_cooper'`.
+
+Drop both the electric bill and the mortgage statement and the property's frontmatter accumulates both sets of fields without conflict — they target different keys, both extractors share one entity, and the merge contract orders them by document date.
 
 ## License
 
