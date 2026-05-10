@@ -449,11 +449,59 @@ The script logs two lines (`invoking claude --print (N deviations, manifest leng
 
 ### What this does *not* do (deferred)
 
-- **Expectation-gaps section** (statement didn't arrive by the 20th of the month). Slice 2.
 - **Unexpected-charges section** (transaction with no matching subscription). Slice 3.
-- **Calendar-month windowing.** v1 uses the most-recent-record per `(entity, field)`. Slice 2 promotes to calendar windows when expectation-gaps land.
 - **Audit pass** against `sources_read:` vs body `→ /source/...` arrows. Still deferred until all three artifacts ship.
 - **Compile-pass scheduling.** Still manual via `python -m plos.compile_anomalies`. Phase 5 plumbing slice.
+
+## Quickstart — Phase 5 Slice 2 (expectation gaps)
+
+Slice 2 adds the second heuristic to `compiled/anomalies.md`: **expectation gaps** — recurring monthly statements that didn't arrive for the currently-due calendar month. Same compile pass, new section.
+
+Cadence is implicit: any `(entity, field)` pair in `EXPECTATION_FIELDS` (`last_utility_bill_amount`, `last_mortgage_statement_amount`, `last_statement_balance`) with at least one historical `extracted_fields` row is treated as "expected to keep arriving monthly." No new entity frontmatter required.
+
+A gap fires when:
+- The `GRACE_DAY` (20th) of a calendar month has passed.
+- That month is the "currently due" month — the most recent month whose 20th has elapsed.
+- No row exists for the `(entity, field)` pair with `source_document_date` in that month.
+
+### Prerequisites (in addition to Slice 1)
+
+- The four Slice 1 Acme bills already in SQLite (Jan/Feb/Mar/Apr → April-current at `2026-05-10`).
+- The Phase 3 mortgage + bank fixtures already consumed (most-recent rows at `2026-05-01` for mortgage, `2026-03-16` for bank).
+
+### Action — override "today" via env var, run the compile pass
+
+```powershell
+# Pin "today" to 2026-05-21 so May 20 has passed → May is the currently-due month.
+$env:PLOS_ANOMALIES_AS_OF = "2026-05-21"
+python -m plos.compile_anomalies
+
+# Clear the override when you're done so subsequent runs use the real date.
+Remove-Item Env:PLOS_ANOMALIES_AS_OF
+```
+
+The log line now reports `(N deviations, M gaps, manifest length: K chars)`.
+
+### What success looks like
+
+With `PLOS_ANOMALIES_AS_OF=2026-05-21`:
+
+1. **`compiled/anomalies.md` has two populated sections.**
+2. **`## Spending deviations`** — same +29% bullet from Slice 1 (April Acme bill vs Jan/Feb/Mar baseline).
+3. **`## Expectation gaps`** — one bullet citing the **First Davenport checking account**, last seen `2026-03-16`, expected month `2026-05`, 1 day overdue. Utility (last seen 2026-05-10) and mortgage (last seen 2026-05-01) both have May rows, so they don't gap.
+4. **Provenance arrows** under both bullets point to the cited entity index.md files.
+5. **`sources_read:`** lists both cited paths.
+
+### Empty-state behaviour
+
+When both lists are empty (no deviations, no gaps), `run` short-circuits and writes a deterministic "no deviations / no missing statements" artifact without invoking Claude. Cheap, reproducible, still emits the full frontmatter contract and both section headings.
+
+### What this does *not* do (deferred)
+
+- **Per-entity expected-cadence frontmatter.** Slice 2 infers cadence from history. Slice 2+ may add an explicit override (e.g., `expected_statements:` list, or `not_expected: [field, ...]` opt-out).
+- **Biweekly cadences.** Paystubs (Beacon) don't participate in gap detection; they'd require a non-monthly heuristic. Future slice if it matters.
+- **Multi-month gap accumulation.** Slice 2 flags only the currently-due month per `(entity, field)`. Older missed months that were flagged in earlier passes and never resolved are not re-flagged. The audit-pass story (later Phase 5) is the right place for that history.
+- **Unexpected-charges section.** Slice 3.
 
 ## License
 

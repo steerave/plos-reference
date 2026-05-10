@@ -11,6 +11,32 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 5 Slice 2 — expectation-gaps heuristic added to
+  `compiled/anomalies.md`.** New `compute_expectation_gaps(conn, *,
+  as_of=None)` function flags `(entity, field)` pairs in a new
+  `EXPECTATION_FIELDS` set (`last_utility_bill_amount`,
+  `last_mortgage_statement_amount`, `last_statement_balance`) where
+  no `extracted_fields` row exists for the currently-due calendar
+  month (the most recent month whose 20th has passed). Cadence is
+  implicit: any pair with at least one historical row is "expected
+  at monthly cadence." No new entity frontmatter required.
+  `compile_anomalies.run` now emits a `## Expectation gaps` section
+  alongside `## Spending deviations`; the combined short-circuit
+  only fires when BOTH lists are empty.
+- **`PLOS_ANOMALIES_AS_OF` env var** — optional `YYYY-MM-DD` override
+  for "today" in the gap detector. Defaults to the system's UTC
+  date; malformed values raise on parse. Useful for demos and tests
+  without monkey-patching `datetime`.
+- **17 new tests** in `tests/test_compile_anomalies.py` covering
+  `_currently_due_month` math (current-month-after-grace,
+  previous-month-before-grace, January rollover),
+  `compute_expectation_gaps` (empty, missing-month flagged,
+  in-due-month skipped, grace-period skipped, allowlist enforced,
+  sort order, year boundary), `_resolve_as_of` parsing,
+  `build_manifest` gap rendering, `_validate_response` for the new
+  required section, and run-level combined-empty short-circuit +
+  gaps-only-invoke-Claude paths. Suite total: 204 passing.
+
 - **Phase 5 Slice 1 — `compiled/anomalies.md` (percentage-deviation
   heuristic).** The second compiled artifact in PLOS. New
   `python -m plos.compile_anomalies` walks the SQLite `extracted_fields`

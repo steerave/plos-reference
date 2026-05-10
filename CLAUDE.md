@@ -712,3 +712,115 @@ output (verified by SHA256).
   remote agent). Still manual. Separate Phase 5 plumbing slice.
 - **`notifications.py` weekly digest** + **`indexer.py` review-queue
   self-clean.** Separate Phase 5 slices.
+
+## Phase 5 Slice 2 conventions (decided during the expectation-gaps build)
+
+Slice 2 adds the second heuristic to `compiled/anomalies.md`:
+expectation gaps. Same compile pass, same `run()` shell, same prompt-
+preamble + manifest contract — one new pre-compute function
+(`compute_expectation_gaps`), one new section
+(`## Expectation gaps`), one new env var (`PLOS_ANOMALIES_AS_OF`).
+Decisions captured here so Slice 3 (unexpected charges) and later
+artifacts extend the pattern.
+
+### Implicit cadence from history
+
+Any `(entity, field)` pair in `EXPECTATION_FIELDS` with at least one
+historical row in `extracted_fields` is treated as "expected at
+monthly cadence." There is no per-entity `expected_statements:`
+frontmatter contract in Slice 2 — subtraction-first. Trade-offs:
+
+- **Pro:** Zero new contract surface. Whatever the worker has been
+  ingesting becomes the gap-detection scope automatically. New
+  extractors plug in for free.
+- **Con:** Can't distinguish a one-off doc (a paid-off mortgage's
+  final statement) from an ongoing series. A future slice can add an
+  opt-out frontmatter (`not_expected: [field, ...]`) if real-world
+  data demands it; the operating instance is the right driver for
+  that decision.
+
+The three Slice 2 entries in `EXPECTATION_FIELDS` —
+`last_utility_bill_amount`, `last_mortgage_statement_amount`,
+`last_statement_balance` — each represent one monthly-statement
+document type. They are NOT the same as `ELIGIBLE_FIELDS`
+(deviation analysis): one statement emits multiple deposit /
+withdrawal / balance fields, so flagging all of them as gaps would
+multi-count one missing document. Using `last_statement_balance` as
+the bank-statement-arrival signal (vs. the deposits/withdrawals
+which feed deviations) keeps the gap surface clean.
+
+### Currently-due month + GRACE_DAY
+
+`_currently_due_month(as_of)` returns the first day of the calendar
+month whose `GRACE_DAY` (20th) has most recently passed:
+
+- `as_of=2026-05-21` → due month = May 2026 (May 20 has passed).
+- `as_of=2026-05-19` → due month = April 2026 (still in grace for May).
+
+A gap exists when no row in `extracted_fields` for the `(entity,
+field)` pair has `source_document_date` inside the due month.
+`days_overdue` is `(as_of - GRACE_DAY-of-due-month).days` — a fresh
+gap reads as `1 day(s) overdue`; a stale one reads in tens of days.
+
+Single-month focus in Slice 2: only the currently-due month is
+flagged. Earlier missed months that were once current but never
+arrived are not re-flagged here. The audit-pass story (later Phase 5)
+is the right place to accumulate "you've been missing this for
+N months" history if it becomes load-bearing.
+
+### `PLOS_ANOMALIES_AS_OF` env var
+
+Defaults to today's UTC date. Override with a `YYYY-MM-DD` string for
+demos and tests. Malformed values raise on `_resolve_as_of()` rather
+than silently fall back — a typo'd override should fail loud.
+
+The `as_of` parameter is plumbed through `run(..., as_of=...)` and
+`build_manifest(..., as_of=...)` and `_empty_anomalies_artifact(as_of=
+...)` so test code can pin the date without monkey-patching `datetime`.
+
+### Combined short-circuit
+
+`run()` invokes Claude only when at least one of `deviations` or
+`gaps` is non-empty. Both empty → write the deterministic
+`_empty_anomalies_artifact(as_of=...)` (frontmatter + both section
+headings + placeholder bullets in each). The shape mirrors what
+Claude would emit, so downstream readers (audit pass,
+`notifications.py`) see one stable contract regardless of how the
+artifact was produced.
+
+### Prompt contract: render, do not detect
+
+The preamble explicitly instructs Claude: "You are NOT detecting
+anomalies — the lists below are authoritative." Both pre-computed
+lists are in the manifest; Claude renders one bullet per list item
+and adds an empty-state placeholder bullet for any empty section.
+This is the same statistics-in-Python / prose-in-Claude split from
+Slice 1, just doubled.
+
+### Test seed convention
+
+`_seed_monthly_field` in `tests/test_compile_anomalies.py` is the
+generalised version of Slice 1's `_seed_monthly_utility_history` —
+it takes `entity_type` / `domain` / `subdir` / `field_name` and
+inserts one row per `(date, value)` tuple. Use it for gap-detection
+tests across property / account / person entity types without
+duplicating boilerplate. Each call uses a slug+field-hashed
+`paperless_id_base` to avoid UNIQUE-constraint collisions when
+seeding two pairs in the same test.
+
+### Out of scope at end of Phase 5 Slice 2
+
+- **Per-entity expected-cadence frontmatter.** Implicit cadence is
+  fine for v1; explicit override is Slice 2+ if real-world data
+  demands it.
+- **Biweekly / weekly / quarterly cadences.** Paystubs (biweekly)
+  don't participate in `EXPECTATION_FIELDS`. A future slice could
+  add a `CADENCE_FOR_FIELD` map if needed; for now monthly is the
+  only supported rhythm.
+- **Multi-month gap accumulation.** Only the currently-due month is
+  flagged. Earlier-month gaps fall off after their pass.
+- **Unexpected-charges section.** Requires transaction-level data
+  and a subscription registry. Slice 3+.
+- **Audit pass.** Still deferred to after `tax-prep.md`.
+- **Compile-pass scheduling, notifications, indexer.** Separate
+  Phase 5 slices.
