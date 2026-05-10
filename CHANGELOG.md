@@ -11,6 +11,18 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 3 Slice 2 — First Davenport Bank statement extractor.** Third
+  graduated extractor (`src/plos/extractors/graduated/bank_statement_first_davenport.py`)
+  recognises a First Davenport Bank monthly checking statement and routes
+  it to the matching account entity via `account_number`. Introduces the
+  first **account** entity in the sample vault
+  (`examples/sample-vault/source/accounts/first-davenport-checking-4521/index.md`)
+  and a new dashboard at `examples/sample-vault/dashboards/account-balances.md`
+  showing the latest statement per account. Sample fixture lands at
+  `tests/fixtures/sample_bills/bank_first_davenport_2026_04.pdf`.
+- New entity matcher `entities.find_account_by_account_number()`.
+- README quickstart gains a "Phase 3 Slice 2 (bank statement)" section.
+
 - **Phase 3 Slice 1 — Mr. Cooper mortgage statement extractor.** Second
   graduated extractor (`src/plos/extractors/graduated/mortgage_statement_mr_cooper.py`)
   recognises a Mr. Cooper monthly statement and routes it to the matching

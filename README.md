@@ -264,6 +264,25 @@ Drag `tests\fixtures\sample_bills\mortgage_mrcooper_2026_04.pdf` into `G:\plos-d
 
 Drop both the electric bill and the mortgage statement and the property's frontmatter accumulates both sets of fields without conflict — they target different keys, both extractors share one entity, and the merge contract orders them by document date.
 
+## Quickstart — Phase 3 Slice 2 (bank statement)
+
+This slice introduces the first **account** entity and the second new dashboard. Same Paperless + worker substrate as Phase 2; no env-var changes.
+
+#### Action — drop the sample bank statement
+
+Drag `tests\fixtures\sample_bills\bank_first_davenport_2026_04.pdf` into `G:\plos-data\paperless\consume\`. The statement is for First Davenport Bank, account `ACCT-4521` (the checking account at `examples/sample-vault/source/accounts/first-davenport-checking-4521/index.md`), statement period 2026-03-16 → 2026-04-15, ending balance $16,529.74.
+
+### What success looks like
+
+1. **In the account's `index.md`** — `examples/sample-vault/source/accounts/first-davenport-checking-4521/index.md` frontmatter gains:
+   - `last_statement_balance: 16529.74`
+   - `last_statement_end_date: 2026-04-15`
+   - `last_statement_deposits: 5420.0`
+   - `last_statement_withdrawals: 3128.66`
+   - `last_statement_url: http://localhost:8888/documents/<M>/`
+2. **In Obsidian, on `examples/sample-vault/dashboards/account-balances.md`** — a Dataview table renders the row for the checking account with the latest balance and a Source link back to Paperless.
+3. **In SQLite** — `extracted_fields` gains six new rows for the statement, each with `handler='graduated:bank_statement_first_davenport'`. The `entities` table gains a row for `first-davenport-checking-4521` with `type='account'`, `domain='finance'`.
+
 ## License
 
 See [LICENSE](./LICENSE).

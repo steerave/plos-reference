@@ -11,8 +11,9 @@ embedded timestamps), so re-running this script during CI or refactors
 does not produce diff churn.
 
 Generated outputs:
-    electric_acme_2026_04.pdf       — Phase 2: Acme Power & Light bill
-    mortgage_mrcooper_2026_04.pdf   — Phase 3 Slice 1: Mr. Cooper statement
+    electric_acme_2026_04.pdf         — Phase 2: Acme Power & Light bill
+    mortgage_mrcooper_2026_04.pdf     — Phase 3 Slice 1: Mr. Cooper statement
+    bank_first_davenport_2026_04.pdf  — Phase 3 Slice 2: First Davenport Bank
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ FIXTURES = Path(__file__).resolve().parent
 
 ELECTRIC_OUTPUT = FIXTURES / "electric_acme_2026_04.pdf"
 MORTGAGE_OUTPUT = FIXTURES / "mortgage_mrcooper_2026_04.pdf"
+BANK_OUTPUT = FIXTURES / "bank_first_davenport_2026_04.pdf"
 
 
 def _new_canvas(path: Path, title: str, author: str, subject: str) -> canvas.Canvas:
@@ -181,11 +183,86 @@ def build_mortgage_statement(path: Path) -> None:
     c.save()
 
 
+def build_bank_statement(path: Path) -> None:
+    c = _new_canvas(
+        path,
+        title="First Davenport Bank — Statement",
+        author="First Davenport Bank",
+        subject="Monthly checking statement",
+    )
+
+    width, _ = LETTER
+    left = 1 * inch
+    right = width - 1 * inch
+    y = 10 * inch
+
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(left, y, "First Davenport Bank")
+    y -= 0.3 * inch
+    c.setFont("Helvetica-Oblique", 11)
+    c.drawString(left, y, "Local banking since 1924")
+    y -= 0.5 * inch
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left, y, "Account holder")
+    y -= 0.22 * inch
+    c.setFont("Helvetica", 11)
+    c.drawString(left, y, "Joe Sample")
+    y -= 0.2 * inch
+    c.drawString(left, y, "123 Main St")
+    y -= 0.2 * inch
+    c.drawString(left, y, "Davenport, IA 52801")
+    y -= 0.45 * inch
+
+    rows = [
+        ("Account number:", "ACCT-4521"),
+        ("Statement period:", "March 16, 2026 - April 15, 2026"),
+    ]
+    c.setFont("Helvetica", 11)
+    for label, value in rows:
+        c.drawString(left, y, label)
+        c.drawString(left + 2.5 * inch, y, value)
+        y -= 0.28 * inch
+
+    y -= 0.4 * inch
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left, y, "Account activity summary")
+    y -= 0.28 * inch
+    c.setFont("Helvetica", 11)
+    summary = [
+        ("Beginning balance:", "$14,238.40"),
+        ("Total deposits:", "$5,420.00"),
+        ("Total withdrawals:", "$3,128.66"),
+    ]
+    for label, value in summary:
+        c.drawString(left + 0.25 * inch, y, label)
+        c.drawRightString(right, y, value)
+        y -= 0.24 * inch
+
+    y -= 0.1 * inch
+    c.line(left + 0.25 * inch, y, right, y)
+    y -= 0.28 * inch
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(left + 0.25 * inch, y, "Ending balance:")
+    c.drawRightString(right, y, "$16,529.74")
+
+    y -= 0.8 * inch
+    c.setFont("Helvetica", 10)
+    c.drawString(left, y, "Questions about this statement?")
+    y -= 0.2 * inch
+    c.drawString(left, y, "Visit your local branch on Brady Street.")
+
+    c.showPage()
+    c.save()
+
+
 def build_all() -> None:
     build_electric_bill(ELECTRIC_OUTPUT)
     print(f"wrote {ELECTRIC_OUTPUT}")
     build_mortgage_statement(MORTGAGE_OUTPUT)
     print(f"wrote {MORTGAGE_OUTPUT}")
+    build_bank_statement(BANK_OUTPUT)
+    print(f"wrote {BANK_OUTPUT}")
 
 
 if __name__ == "__main__":

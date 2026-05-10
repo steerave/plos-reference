@@ -142,3 +142,48 @@ def test_skips_property_without_loan_number(tmp_path):
     path = entities.find_property_by_mortgage_loan_number("LN-9912345", tmp_path)
     assert path is not None
     assert path.parent.name == "owned"
+
+
+# -----------------------------------------------------------------------------
+# find_account_by_account_number
+# -----------------------------------------------------------------------------
+
+
+def _account(vault: Path, slug: str, frontmatter: dict) -> Path:
+    folder = vault / "source" / "accounts" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    fm_lines = "\n".join(f"{k}: {v}" for k, v in frontmatter.items())
+    (folder / "index.md").write_text(
+        f"---\n{fm_lines}\n---\n\n# {slug}\n",
+        encoding="utf-8",
+    )
+    return folder / "index.md"
+
+
+def test_finds_account_by_number(tmp_path):
+    _account(
+        tmp_path,
+        "first-davenport-checking-4521",
+        {"entity": "account", "account_number": "ACCT-4521"},
+    )
+    _account(
+        tmp_path,
+        "beacon-savings-7788",
+        {"entity": "account", "account_number": "ACCT-7788"},
+    )
+    path = entities.find_account_by_account_number("ACCT-4521", tmp_path)
+    assert path is not None
+    assert path.parent.name == "first-davenport-checking-4521"
+
+
+def test_returns_none_for_unknown_account_number(tmp_path):
+    _account(
+        tmp_path,
+        "first-davenport-checking-4521",
+        {"entity": "account", "account_number": "ACCT-4521"},
+    )
+    assert entities.find_account_by_account_number("ACCT-XX", tmp_path) is None
+
+
+def test_account_lookup_returns_none_when_no_accounts_dir(tmp_path):
+    assert entities.find_account_by_account_number("ACCT-4521", tmp_path) is None

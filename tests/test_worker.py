@@ -37,10 +37,14 @@ def conn(tmp_path):
 
 @pytest.fixture
 def vault(tmp_path):
-    """Build a tmp vault with one property keyed to ACCT-12345 and LN-9912345."""
-    folder = tmp_path / "vault" / "source" / "properties" / "123-main-davenport"
-    folder.mkdir(parents=True)
-    (folder / "index.md").write_text(
+    """Build a tmp vault with one property keyed to ACCT-12345 + LN-9912345
+    and one account keyed to ACCT-4521 — the three entities the slices in
+    Phase 3 route to."""
+    properties = (
+        tmp_path / "vault" / "source" / "properties" / "123-main-davenport"
+    )
+    properties.mkdir(parents=True)
+    (properties / "index.md").write_text(
         "---\n"
         "type: source\n"
         "entity: property\n"
@@ -51,6 +55,23 @@ def vault(tmp_path):
         "locked_fields: []\n"
         "---\n\n"
         "# 123 Main St, Davenport, IA\n",
+        encoding="utf-8",
+    )
+    account = (
+        tmp_path / "vault" / "source" / "accounts" / "first-davenport-checking-4521"
+    )
+    account.mkdir(parents=True)
+    (account / "index.md").write_text(
+        "---\n"
+        "type: source\n"
+        "entity: account\n"
+        "slug: first-davenport-checking-4521\n"
+        "bank: First Davenport Bank\n"
+        "purpose: checking\n"
+        "account_number: ACCT-4521\n"
+        "locked_fields: []\n"
+        "---\n\n"
+        "# First Davenport Bank — Checking •••4521\n",
         encoding="utf-8",
     )
     return tmp_path / "vault"
@@ -104,6 +125,17 @@ SAMPLE_MORTGAGE_STATEMENT = (
     "Statement date: 2026-04-15\n"
     "Principal balance: $284,237.18\n"
     "Total amount due: $2,452.72\n"
+)
+
+
+SAMPLE_BANK_STATEMENT = (
+    "First Davenport Bank\n"
+    "Account number: ACCT-4521\n"
+    "Statement period: March 16, 2026 - April 15, 2026\n"
+    "Beginning balance: $14,238.40\n"
+    "Total deposits: $5,420.00\n"
+    "Total withdrawals: $3,128.66\n"
+    "Ending balance: $16,529.74\n"
 )
 
 
@@ -333,6 +365,65 @@ def test_mortgage_statement_routes_to_property_via_loan_number(conn, vault, capl
     } <= field_names
     for r in rows:
         assert r["handler"] == "graduated:mortgage_statement_mr_cooper"
+
+
+@responses.activate
+def test_bank_statement_routes_to_account_via_account_number(conn, vault, caplog):
+    """First Davenport Bank statement extractor + entity matcher land
+    bank-statement fields on the account entity (a different entity type
+    than the property the previous extractors target)."""
+    _insert(conn, 12, document_date="2026-04-15", correspondent="First Davenport Bank")
+    _mock_document(12, SAMPLE_BANK_STATEMENT)
+
+    with caplog.at_level(logging.INFO, logger="plos.worker"):
+        worker.run_one_pass(conn, vault)
+
+    doc = conn.execute(
+        "SELECT status, document_type FROM documents WHERE paperless_id=12"
+    ).fetchone()
+    assert doc["status"] == "done"
+    assert doc["document_type"] == "bank_statement_first_davenport"
+
+    account_path = (
+        vault
+        / "source"
+        / "accounts"
+        / "first-davenport-checking-4521"
+        / "index.md"
+    )
+    text = account_path.read_text(encoding="utf-8")
+    assert "last_statement_balance: 16529.74" in text
+    assert "last_statement_deposits: 5420.0" in text
+    assert "last_statement_withdrawals: 3128.66" in text
+    assert "last_statement_end_date: '2026-04-15'" in text
+    assert "account_number: ACCT-4521" in text  # already present, idempotent
+
+    rows = conn.execute(
+        "SELECT field_name, handler FROM extracted_fields WHERE document_id = ?",
+        (
+            conn.execute("SELECT id FROM documents WHERE paperless_id=12").fetchone()[
+                "id"
+            ],
+        ),
+    ).fetchall()
+    field_names = {r["field_name"] for r in rows}
+    assert {
+        "last_statement_balance",
+        "last_statement_end_date",
+        "last_statement_url",
+        "account_number",
+        "last_statement_deposits",
+        "last_statement_withdrawals",
+    } <= field_names
+    for r in rows:
+        assert r["handler"] == "graduated:bank_statement_first_davenport"
+
+    # entities table picks up the new account row, with the right type/domain
+    ent = conn.execute(
+        "SELECT type, domain, slug FROM entities WHERE slug='first-davenport-checking-4521'"
+    ).fetchone()
+    assert ent["type"] == "account"
+    assert ent["domain"] == "finance"
 
 
 def test_vault_root_required_in_main(monkeypatch):

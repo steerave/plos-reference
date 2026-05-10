@@ -71,3 +71,14 @@ def find_property_by_mortgage_loan_number(
         "properties",
         lambda fm: fm.get("mortgage_loan_number") == loan_number,
     )
+
+
+def find_account_by_account_number(
+    account_number: str, vault_root: Path
+) -> Path | None:
+    """Return the account whose account_number frontmatter equals `account_number`."""
+    return _find_in(
+        vault_root,
+        "accounts",
+        lambda fm: fm.get("account_number") == account_number,
+    )
