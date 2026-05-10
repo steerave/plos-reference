@@ -34,6 +34,23 @@ is the baseline and is not enumerated below.
   requires Redis for the Django cache and Celery broker. `ARCHITECTURE.md`
   records Redis as a named exception; `EVOLUTION.md` gains an
   "Implementation reality" section explaining the correction.
+- Paperless consumer switched from default inotify watching to polling
+  (`PAPERLESS_CONSUMER_POLLING=10`). Inotify events do not propagate
+  through Windows + Docker Desktop bind mounts, so files dropped on the
+  host were never noticed. Polling visits the consume folder every 10s.
+
+### Fixed
+
+- `scripts/post_consume_hook.py` now starts with `#!/usr/bin/env python3`.
+  Without the shebang, Paperless's exec of the hook returned
+  `OSError: [Errno 8] Exec format error` and aborted the consume task
+  before the SQLite row was inserted, so the worker never saw new
+  documents. The unit tests imported the module directly and so missed
+  the bug.
+- New `.gitattributes` enforces LF line endings for `*.py` and `*.sh` so
+  that git's default `core.autocrlf` on Windows can't silently revert
+  the hook's shebang to CRLF on a fresh clone — that would reintroduce
+  the same `Exec format error` inside the Linux container.
 - Python package layout fixed to match `pyproject.toml`: code now lives at
   `src/plos/` so `pip install -e .` produces an importable `plos` package.
 - `.gitignore` now excludes `.claude/settings.local.json` per the user's

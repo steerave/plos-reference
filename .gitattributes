@@ -1,0 +1,15 @@
+# Files that get exec'd inside the Linux Paperless container must keep
+# LF line endings regardless of the developer's git autocrlf setting,
+# otherwise the shebang gets a trailing \r and Linux exec returns
+# "Exec format error" on first ingestion.
+scripts/post_consume_hook.py text eol=lf
+
+# Apply LF to all Python and shell sources for consistency — most tooling
+# (linters, OCR pipelines, etc.) assumes LF and a stray CRLF can fail in
+# subtle ways inside containers.
+*.py text eol=lf
+*.sh text eol=lf
+
+# Markdown stays text but lets git pick the platform-native ending so
+# Windows editors don't fight diffs on every save.
+*.md text

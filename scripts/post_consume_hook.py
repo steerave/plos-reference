@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Paperless-ngx post-consume hook. Runs INSIDE the Paperless container.
 
