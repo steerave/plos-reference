@@ -11,6 +11,25 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 4 Slice 1 — `compiled/this-week.md` compile pass.** First
+  compiled artifact in PLOS. New `python -m plos.compile_this_week`
+  command builds a manifest of every entity index.md, every dashboard,
+  and the previous compile output (if any), then shells out to the
+  `claude` CLI (`--print` non-interactive mode) for priority reasoning,
+  and atomically writes the rendered `this-week.md` per the format
+  spec in `docs/artifact-templates.md`. Pure-AI implementation: Claude
+  reads the whole manifest and produces the full markdown. Format-
+  validation gate refuses to write if the response doesn't start with
+  YAML frontmatter or is missing a required section heading — the
+  existing artifact is preserved on bad output.
+- Two demo deadline fields seeded in the sample vault:
+  `insurance_renewal_date: 2026-05-22` on `123-main-davenport` and
+  `drivers_license_expiry: 2026-05-15` on `joe`. Without these, the
+  compile pass had nothing to surface; with them, the demo produces a
+  cross-domain "this week" prioritisation.
+- README quickstart gains a "Phase 4 Slice 1 (this-week compile pass)"
+  section.
+
 - **Phase 3 Slice 3 — Beacon Software pay stub extractor.** Fourth
   graduated extractor (`src/plos/extractors/graduated/paystub_beacon_software.py`)
   recognises a Beacon Software bi-weekly pay stub and routes it to the

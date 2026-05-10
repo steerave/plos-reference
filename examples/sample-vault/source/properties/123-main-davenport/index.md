@@ -11,6 +11,7 @@ owners:
 mortgage_servicer_current: Mr. Cooper
 mortgage_loan_number: LN-9912345
 insurance_carrier_current: State Farm
+insurance_renewal_date: '2026-05-22'
 hoa: false
 electric_account: ACCT-12345
 electric_provider: Acme Power & Light

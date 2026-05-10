@@ -5,6 +5,7 @@ slug: joe
 status: active
 legal_name: Joe Sample
 birthdate: '1985-03-12'
+drivers_license_expiry: '2026-05-15'
 employer_current: Beacon Software
 locked_fields: []
 ---

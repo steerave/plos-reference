@@ -275,3 +275,108 @@ doesn't read them as gaps:
   for new fields land in entity records and are referenced in
   `CONVENTIONS.md` if they need governance. Phase 4+ may stand up
   `_schema/` formally.
+
+## Phase 4 conventions (decided during the this-week.md compile pass)
+
+Phase 4 introduced compile passes — the first place in PLOS where
+Claude Code is invoked to write back into the vault. Slice 1 lands the
+first compiled artifact, `compiled/this-week.md`. Decisions captured
+here so future phases can extend the pattern.
+
+### Compile passes shell out to the `claude` CLI
+
+Per `ARCHITECTURE.md` the same Claude Code subscription does triple
+duty: scheduled compile passes, ad-hoc analytical sessions, long-tail
+extraction. Phase 4 Slice 1 makes that concrete: a Python script
+(`src/plos/compile_this_week.py`) builds a manifest and runs:
+
+```python
+subprocess.run(
+    ["claude", "--print"],
+    input=prompt,
+    capture_output=True,
+    text=True,
+    check=True,
+)
+```
+
+No second SDK dependency, no Anthropic API keys juggled separately —
+the user's existing Claude Code authentication carries the call.
+`--print` is the non-interactive flag. Future compile passes
+(`anomalies.md`, `tax-prep.md`) follow the same shape.
+
+### Manifest shape
+
+The manifest is a single markdown blob the prompt template includes
+verbatim. For `this-week`, it bundles:
+
+- Today's date (UTC, ISO format).
+- Every `source/*/*/index.md` (full file content, frontmatter + body).
+- Every `dashboards/*.md` (full file).
+- The previous `compiled/this-week.md` if present (for delta context).
+
+Each piece is wrapped in a `## /vault/path/file.md` heading and a
+fenced `markdown` block, so Claude can reason over paths and content
+together. At sample-vault scale the entire manifest fits comfortably
+in a single Claude Code session; if a real-world manifest gets
+unwieldy, the natural next step is per-domain manifests, not a
+streaming pipeline.
+
+### Format-validation gate
+
+Compile passes must never corrupt the artifact even if the AI
+misbehaves. Every compile pass is wrapped in:
+
+1. Run subprocess with `check=True` — non-zero exit raises
+   `CalledProcessError` and no write happens.
+2. Validate the response shape — the artifact must start with the
+   YAML frontmatter delimiter (`---`) and contain every required
+   section heading. If validation fails, the run raises and the
+   existing file (if any) is preserved.
+3. Atomic write — temp file + fsync + `os.replace`, the same
+   discipline as `vault.merge_frontmatter`. A reader opening the
+   artifact during regeneration sees the previous version or the new
+   version, never a half-written file.
+
+For `this-week.md` the required section headings are `## Must do`,
+`## Should do`, `## Watching`. (`## Birthdays / dates this week` is
+omitted by Claude when there's nothing in the window, so it's not in
+the required set.)
+
+### Source provenance is non-negotiable
+
+Per ARCHITECTURE.md design principle: "Source provenance inline.
+Every compiled-artifact claim cites the source path it came from."
+The compile-pass prompt instructs Claude to emit `→ /source/...`
+arrows under every bullet, and the artifact's `sources_read:`
+frontmatter list must enumerate every cited path. This is the
+contract that makes Phase 5+ audit passes possible — those compare
+the `sources_read:` declared list against the `→ /source/...` arrows
+present in the body, and flag any drift.
+
+### Sample vault demo seeding
+
+Phase 4 Slice 1 added two fictional deadline fields so the compile
+pass has cross-domain content to surface against:
+
+- `insurance_renewal_date: '2026-05-22'` on `123-main-davenport`
+- `drivers_license_expiry: '2026-05-15'` on `joe`
+
+Both fall inside a 14-day "this week" lookahead from the demo's
+`currentDate` (2026-05-11). Future deadline fields land in entity
+frontmatter directly without a schema entry; CONVENTIONS.md's
+"naming is the contract" rule covers it for now. Phase 5+ may stand
+up `_schema/` formally.
+
+### Out of scope at end of Phase 4 Slice 1
+
+- **Compile-pass scheduling.** v1 is manual `python -m
+  plos.compile_this_week`. Wiring up Windows Task Scheduler or a
+  Claude Code remote agent is a deployment detail that fits Phase 5.
+- **`pending_claude` drain workflow.** Architecturally paired with
+  the compile pass under "the same session pattern." Phase 4b.
+- **`corrections.md` + `import_corrections.py`.** Vault-wide override
+  file with provenance. Phase 4c.
+- **Audit pass against `sources_read:`.** Phase 5+.
+- **The other two compiled artifacts** (`anomalies.md`, `tax-prep.md`).
+  Phase 5.

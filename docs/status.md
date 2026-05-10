@@ -1,5 +1,73 @@
 # Project Status Log
 
+## 2026-05-12
+
+**Done:**
+- Verified Phase 3 end-to-end on the live Paperless instance: dropped
+  all four sample-bill PDFs (Phase 2 electric + Phase 3 mortgage /
+  bank / pay stub) into the live consume folder, watched the worker
+  route each through real OCR, all four reached `status='done'`.
+  `extracted_fields` recorded 23 rows across the four expected
+  handlers; three entity types instantiated in the `entities` table
+  (property, account, person). One integration-only bug surfaced and
+  was self-fixed: the worker process had been started before the
+  Phase 3 commits landed, so only the electric extractor was loaded
+  in the running registry — restart resolved it. The freshness rule
+  fired exactly as designed when mortgage's Paperless-detected date
+  (2026-05-01) ran ahead of electric's (2026-03-15) — the audit
+  trail still recorded every extraction even when the merge skipped.
+- Closed Phase 4 Slice 1 (compile pass for `this-week.md`):
+  - Added `src/plos/compile_this_week.py` — `python -m plos.compile_this_week`
+    builds a manifest of every entity index.md + every dashboard +
+    the previous compile output, shells out to the `claude` CLI in
+    `--print` non-interactive mode, validates the response shape
+    (must start with `---`, must contain `Must do` / `Should do` /
+    `Watching` section headings), and atomically writes the result
+    to `examples/sample-vault/compiled/this-week.md`.
+  - Seeded the sample vault with two fictional deadline fields so
+    the compile pass has cross-domain content to prioritise:
+    `insurance_renewal_date: '2026-05-22'` on the property,
+    `drivers_license_expiry: '2026-05-15'` on Joe.
+  - 12 unit tests cover manifest building (entity files, dashboards,
+    previous output, today's date), atomic write (no temp leak,
+    overwrite of stale output), format-validation gate (rejects
+    response without frontmatter or missing sections), subprocess
+    failure propagation, and `PLOS_VAULT_ROOT` env handling. All
+    Claude invocations mocked.
+  - Updated CHANGELOG, README (new "Phase 4 Slice 1" quickstart
+    section), CLAUDE.md (new "Phase 4 conventions" section
+    documenting the compile-pass invocation contract, manifest
+    shape, format-validation gate, atomic-write discipline, source
+    provenance rules).
+- Test count: 128 passing in 0.8s (was 116 at end of Phase 3 — added
+  12 tests for the compile pass).
+
+**Next:**
+- Phase 4 Slice 1 demo verification: run `python -m plos.compile_this_week`
+  on the live machine, open `compiled/this-week.md` in Obsidian,
+  confirm both seeded items appear with `→ /source/...` provenance
+  arrows.
+- Begin Phase 4b: `pending_claude` drain workflow. The MidAmerican
+  bill at `paperless_id=3` has been sitting since the Phase 2 demo
+  and is exactly what Phase 4b is designed to handle. Architecture
+  pairs it with the compile pass under "the same session pattern."
+- Phase 4c: `corrections.md` + `import_corrections.py` — the vault-
+  wide override file with provenance.
+
+**Notes:**
+- The compile-pass invocation contract is the new architectural
+  delta in Phase 4. The pattern (build manifest → shell to claude
+  CLI → validate response shape → atomic write) is the template
+  every future compiled artifact follows: `anomalies.md` and
+  `tax-prep.md` in Phase 5 plug into the same shape with their own
+  manifest builder + section-heading set.
+- Source provenance is the contract that makes Phase 5+ audit passes
+  possible. The artifact's `sources_read:` frontmatter list and the
+  `→ /source/...` arrows in the body must agree; the audit pass
+  walks the artifact and flags any drift. This is why the
+  format-validation gate at write time is non-negotiable — a corrupt
+  artifact would silently break the audit pass too.
+
 ## 2026-05-11
 
 **Done:**
