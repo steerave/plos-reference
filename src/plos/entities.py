@@ -84,6 +84,22 @@ def find_account_by_account_number(
     )
 
 
+def find_by_slug(slug: str, vault_root: Path) -> Path | None:
+    """Return any entity index.md whose folder name equals `slug`.
+
+    Walks `source/<entity-type>/<slug>/index.md` across every entity
+    type (properties, accounts, people, vehicles, organizations).
+    Used by the corrections-import path, which is keyed off the
+    entity slug rather than a routing field.
+    """
+    source_root = vault_root / "source"
+    if not source_root.is_dir():
+        return None
+    for index_path in sorted(source_root.glob(f"*/{slug}/index.md")):
+        return index_path
+    return None
+
+
 def find_person_by_employer_and_name(
     legal_name: str, employer: str, vault_root: Path
 ) -> Path | None:

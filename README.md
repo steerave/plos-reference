@@ -368,7 +368,47 @@ Pre-existing `pending_claude` rows in SQLite get processed. The MidAmerican bill
 
 - Auto-create new entity files from Claude's proposals. Phase 5+ stands up the formal review-queue surface and the human-in-the-loop apply step.
 - Render `_review/queue.md` in the vault. Phase 5.
-- The `corrections.md` + `import_corrections.py` flow. Phase 4c.
+
+## Quickstart — Phase 4c (corrections override)
+
+The merge contract says **corrections always win** — they outrank both fresh extractions and the freshness rule itself. Phase 4c gives you the surface to add them: `examples/sample-vault/corrections.md` carries a YAML list of `{slug, field, value, source, reason}` entries; `python -m plos.import_corrections` applies them.
+
+#### Action — add a correction and import
+
+Edit `examples/sample-vault/corrections.md` and add an entry to the `corrections:` frontmatter list. Example:
+
+```yaml
+---
+type: corrections
+corrections:
+  - slug: 123-main-davenport
+    field: last_utility_bill_amount
+    value: 142.99
+    source: 'http://localhost:8888/documents/4/'
+    reason: 'OCR misread the cents column on the April Acme bill.'
+---
+```
+
+Then run:
+
+```powershell
+python -m plos.import_corrections
+```
+
+The script logs one line per applied entry and a final summary like `import_corrections complete: {'applied': 1, 'no_entity': 0, 'errored': 0}`.
+
+### What success looks like
+
+1. **Entity frontmatter updated.** Open `examples/sample-vault/source/properties/123-main-davenport/index.md`; `last_utility_bill_amount` is now 142.99 (or whatever you chose).
+2. **Field locked.** The same file's `locked_fields:` list now contains the field name. Future Acme bill processing will *not* overwrite it — `vault.merge_frontmatter` skips locked fields by design.
+3. **SQLite audit row.** The `corrections` table has one row per `(entity_id, field_name)` pair with the corrected value and timestamp.
+4. **Idempotent.** Re-running the script produces the same state — no duplicate audit rows, no unnecessary file writes.
+
+### What this does *not* do (deferred)
+
+- **Sync mode (remove corrections).** v1 is append-only — removing an entry from `corrections.md` does not undo the correction. To remove it manually: edit the entity's `index.md` to remove the field from `locked_fields:` and reset its value, then `DELETE FROM corrections WHERE entity_id=? AND field_name=?` in SQLite. Phase 5+ may automate.
+- **Cross-correction conflict detection.** Adding two corrections for the same entity+field with different values applies them in file order (the second overwrites the first on import). No warning is emitted.
+- **Auto-validation that the field name is sensible** (e.g. "did you typo `electic_account`?"). The script writes whatever you ask.
 
 ## License
 

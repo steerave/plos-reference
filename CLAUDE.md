@@ -473,8 +473,120 @@ run, so transient failures stay visible in stdout.
   review_reason JSON and decides. Phase 5+ tooling.
 - **`_review/queue.md` rendering.** Reading SQLite for queued
   proposals and rendering them as a vault page is Phase 5+.
-- **`corrections.md` + `import_corrections.py`.** Phase 4c.
 - **Schema migration to allow `extracted_fields.entity_id IS NULL`.**
   Would let unmatched audit rows land properly, but requires SQLite
   table-rebuild migration on existing databases. Defer until the
   audit-pass story (Phase 5) makes it load-bearing.
+
+## Phase 4c conventions (decided during the corrections workflow build)
+
+Phase 4c lands the override surface called out in
+`examples/sample-vault/CONVENTIONS.md` under the merge contract's
+first rule: "Corrections always win." Two new pieces of code, one new
+vault file:
+
+### `corrections.md` is YAML-frontmatter-only
+
+The file at `<vault_root>/corrections.md` carries the override list
+in its YAML frontmatter under a `corrections:` key:
+
+```yaml
+---
+type: corrections
+corrections:
+  - slug: 123-main-davenport
+    field: last_utility_bill_amount
+    value: 142.99
+    source: 'http://localhost:8888/documents/4/'
+    reason: 'OCR misread the cents column.'
+---
+```
+
+The body of the file is prose for humans (when to use this vs.
+`locked_fields:` directly, format docs, examples). `slug`, `field`,
+and `value` are required per entry; `source` and `reason` are
+optional but encouraged for the audit trail.
+
+### `vault.apply_correction` is the only function that bypasses the freshness rule
+
+`merge_frontmatter` honors the freshness rule from CONVENTIONS.md:
+existing `data_effective_date >= source_doc_date` skips every field.
+That rule is what makes ingestion order-independent for extracted
+documents.
+
+`apply_correction(path, field_name, value)` is the deliberate
+exception. It:
+
+1. Sets the field to the corrected value unconditionally.
+2. Appends the field name to the entity's `locked_fields:` list (if
+   not already there).
+3. Atomically writes via temp+fsync+os.replace.
+
+It does *not* touch `data_effective_date`. Corrections are orthogonal
+to freshness — they're a separate axis of authority. Future merges
+honor the correction because the field is now in `locked_fields:`,
+not because of any date comparison.
+
+### Corrections piggyback on `locked_fields:`
+
+Phase 4c chose not to introduce a new "corrected" status alongside
+`locked_fields`. The reason: `vault.merge_frontmatter` already skips
+locked fields, and re-implementing the same skip logic via a SQLite
+lookup would mean every merge call needs a database connection.
+Subtraction wins — corrections set `locked_fields:` and the merge
+contract works unchanged.
+
+The trade-off: the entity frontmatter no longer distinguishes
+"user-locked because they hand-curated this" from "locked because a
+correction was imported." Both look like a `locked_fields:` entry. A
+Phase 5+ audit pass can reconcile by cross-referencing the SQLite
+`corrections` table — every `corrections` row's `field_name` should
+appear in the corresponding entity's `locked_fields:`, and any
+`locked_fields:` entry without a `corrections` row is a hand-lock.
+
+### `import_corrections` is append-only in v1
+
+Removing an entry from `corrections.md` does NOT undo the correction.
+The entity's `locked_fields:` and the SQLite `corrections` row both
+persist. To undo, the user manually edits both surfaces. Phase 5+ may
+add a sync mode where `corrections.md` is the source of truth.
+
+The reason for append-only-first: a sync mode would need to compare
+"what's in the file now" with "what's in SQLite + the entity files"
+and remove the diff. That's a larger semantic step (delete-and-
+unlock-and-restore-data-effective-date) and worth taking only when
+the audit-pass story gives it a clear shape.
+
+### Audit row shape
+
+`corrections` table per the schema:
+
+```
+INTEGER id, INTEGER entity_id (FK), TEXT field_name,
+TEXT correct_value, INTEGER source_document_id, TIMESTAMP created_at
+```
+
+`source_document_id` stays NULL in v1 — the `source:` field in
+corrections.md is a free-text URL/note, not a Paperless document ID.
+A Phase 5+ enhancement could parse Paperless URLs out of `source:` and
+back-fill the FK.
+
+If the entity has not yet been seen by the worker (no `entities`
+table row), the import script applies the frontmatter correction and
+SKIPS the audit row — `corrections.entity_id` is FK-constrained.
+That's logged at INFO level. A subsequent worker run that creates
+the entity will not back-fill the audit; for now the absence of an
+audit row when frontmatter has the lock is itself the signal that
+the correction predates any worker activity.
+
+### Out of scope at end of Phase 4c
+
+- **Sync mode.** Remove-an-entry behaviour. Phase 5+.
+- **Cross-correction conflict detection.** Two entries for the same
+  entity+field apply in file order; no warning. Phase 5+ if it
+  becomes a problem.
+- **Schema enhancement: `corrections.source_document_url TEXT`.**
+  Would let the audit row capture the free-text source from
+  corrections.md without piggybacking on the FK column. Phase 5+.
+- **Back-filling audit rows when the entity is later created by the
+  worker.** Phase 5+ if needed.

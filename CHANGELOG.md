@@ -11,6 +11,28 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 4c — `corrections.md` + `import_corrections.py`.** The
+  vault-edit-then-import override flow per
+  `examples/sample-vault/CONVENTIONS.md`'s "Corrections always win"
+  rule. New `examples/sample-vault/corrections.md` carries a
+  YAML-frontmatter `corrections:` list of `{slug, field, value,
+  source, reason}` entries; `python -m plos.import_corrections`
+  reads it and for each entry: locates the entity index.md by slug,
+  sets the field to the corrected value, appends the field to the
+  entity's `locked_fields:` list (so future merges skip it on the
+  freshness rule), and inserts/updates a row in the SQLite
+  `corrections` audit table. Idempotent — re-running produces the
+  same state.
+- New `vault.apply_correction(path, field_name, value)` helper —
+  atomic write that bypasses the freshness rule from
+  `merge_frontmatter`. Used only by the import script; corrections
+  are orthogonal to the freshness contract by design.
+- New `entities.find_by_slug(slug, vault_root)` helper — generic
+  any-entity-type lookup, since `import_corrections` keys off slug
+  rather than a routing field.
+- README quickstart gains a "Phase 4c (corrections override)"
+  section.
+
 - **Phase 4b — `pending_claude` drain workflow.** New
   `python -m plos.drain_pending_claude` walks every
   `documents.status='pending_claude'` row, shells out to the `claude`

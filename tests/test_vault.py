@@ -215,3 +215,85 @@ def test_handles_file_with_no_frontmatter(tmp_path):
     assert text.startswith("---\n")
     fm = yaml.safe_load(text.split("---\n")[1])
     assert fm["last_utility_bill_amount"] == 142.37
+
+
+# -----------------------------------------------------------------------------
+# apply_correction (Phase 4c)
+# -----------------------------------------------------------------------------
+
+
+def test_apply_correction_sets_value_and_locks_field(tmp_path):
+    p = _write(tmp_path, PROPERTY_TEMPLATE)
+
+    changed = vault.apply_correction(p, "last_utility_bill_amount", 999.99)
+
+    assert changed is True
+    fm = _read_frontmatter(p)
+    assert fm["last_utility_bill_amount"] == 999.99
+    assert "last_utility_bill_amount" in fm["locked_fields"]
+
+
+def test_apply_correction_bypasses_freshness(tmp_path):
+    """A correction with no source_doc_date input should still apply even
+    when the entity has a future data_effective_date — corrections always win."""
+    p = _write(
+        tmp_path,
+        PROPERTY_TEMPLATE.replace(
+            "locked_fields: []",
+            "locked_fields: []\ndata_effective_date: 2099-12-31",
+        ),
+    )
+
+    vault.apply_correction(p, "last_utility_bill_amount", 555.55)
+
+    fm = _read_frontmatter(p)
+    assert fm["last_utility_bill_amount"] == 555.55
+    # data_effective_date is untouched — corrections are orthogonal to freshness
+    assert str(fm["data_effective_date"]).startswith("2099-12-31")
+
+
+def test_apply_correction_idempotent_when_already_set(tmp_path):
+    p = _write(
+        tmp_path,
+        PROPERTY_TEMPLATE.replace(
+            "locked_fields: []",
+            "locked_fields:\n  - last_utility_bill_amount\nlast_utility_bill_amount: 999.99",
+        ),
+    )
+    original_mtime = p.stat().st_mtime_ns
+
+    changed = vault.apply_correction(p, "last_utility_bill_amount", 999.99)
+
+    assert changed is False
+    assert p.stat().st_mtime_ns == original_mtime
+
+
+def test_apply_correction_appends_to_existing_locked_fields(tmp_path):
+    p = _write(
+        tmp_path,
+        PROPERTY_TEMPLATE.replace(
+            "locked_fields: []",
+            "locked_fields:\n  - some_other_field",
+        ),
+    )
+
+    vault.apply_correction(p, "last_utility_bill_amount", 999.99)
+
+    fm = _read_frontmatter(p)
+    assert "some_other_field" in fm["locked_fields"]
+    assert "last_utility_bill_amount" in fm["locked_fields"]
+
+
+def test_apply_correction_does_not_change_data_effective_date(tmp_path):
+    p = _write(
+        tmp_path,
+        PROPERTY_TEMPLATE.replace(
+            "locked_fields: []",
+            "locked_fields: []\ndata_effective_date: 2026-04-15",
+        ),
+    )
+
+    vault.apply_correction(p, "last_utility_bill_amount", 999.99)
+
+    fm = _read_frontmatter(p)
+    assert str(fm["data_effective_date"]).startswith("2026-04-15")

@@ -1,5 +1,79 @@
 # Project Status Log
 
+## 2026-05-14
+
+**Done:**
+- Verified Phase 4b end-to-end on the live MidAmerican bill at
+  `paperless_id=3`. Drain extracted a clean
+  `utility_bill_combined` doc_type with 11 fields including per-
+  utility breakdown ($102.70 electric + $74.99 gas), kWh and therms,
+  the routing keys (account 31630-76026, both providers), and a
+  proposed property entity with slug `2835-west-ct-bettendorf`.
+  Real-world bill, real-world OCR, real-world Claude — and the
+  field-naming convention proved flexible enough that Claude
+  invented two new domain-appropriate field names
+  (`last_utility_bill_electric_amount`,
+  `last_utility_bill_gas_amount`) without violating the contract.
+- Closed Phase 4c (corrections override workflow):
+  - Added `examples/sample-vault/corrections.md` — YAML-frontmatter
+    file with a `corrections:` list of `{slug, field, value, source,
+    reason}` entries; prose body documents the format.
+  - Added `src/plos/vault.py:apply_correction()` — atomic write that
+    sets a field AND appends to `locked_fields:`. Bypasses the
+    freshness rule by design (corrections are orthogonal to
+    freshness).
+  - Added `src/plos/entities.py:find_by_slug()` — generic any-
+    entity-type lookup.
+  - Added `src/plos/import_corrections.py` —
+    `python -m plos.import_corrections` reads the file, locates each
+    entity by slug via `find_by_slug`, calls `apply_correction`, and
+    inserts/updates a row in the SQLite `corrections` audit table
+    (DELETE + INSERT for update semantics — keeps one row per
+    entity+field). Counts outcomes as
+    `{'applied': N, 'no_entity': M, 'errored': K}`.
+  - 25 new tests across `test_vault.py` (5 new for
+    `apply_correction`), `test_entities.py` (5 new for
+    `find_by_slug`), and the new `test_import_corrections.py` (15
+    tests covering parse / apply_one / multi-entry run / error
+    paths / env handling).
+  - Updated CHANGELOG, README (new "Phase 4c (corrections override)"
+    quickstart), CLAUDE.md (new "Phase 4c conventions" section
+    documenting the YAML format, the freshness-bypass discipline,
+    the locked_fields piggyback design, the v1 append-only
+    semantics, and the audit-row shape).
+- Test count: 167 passing in 1.05s (was 142 at end of Phase 4b).
+
+**Next:**
+- Live demo of Phase 4c: edit `corrections.md` to add an entry,
+  run `python -m plos.import_corrections`, confirm the entity
+  frontmatter updates, the field shows in `locked_fields:`, and the
+  SQLite audit row lands.
+- Phase 5: scheduling (Windows Task Scheduler or a Claude Code
+  remote agent for the daily `this-week` compile pass), the
+  remaining two compiled artifacts (`anomalies.md`, `tax-prep.md`),
+  the audit pass that verifies `sources_read:` declarations match
+  in-body `→ /source/...` arrows. **MVP marker.**
+
+**Notes:**
+- Phase 4 is now feature-complete per the original phasing in
+  ARCHITECTURE.md. Three Slices landed: 4-1 (compile pass), 4b
+  (drain), 4c (corrections). Each follows a similar shape — a
+  `python -m plos.<thing>` entry point, a manifest or input file
+  per call, atomic vault writes, structured audit in SQLite. The
+  Claude Code CLI is now invoked from two places (compile pass +
+  drain); corrections.md is human-driven, no AI involved.
+- The locked_fields piggyback for corrections is the most
+  interesting design choice in Phase 4c. It avoids passing a
+  database connection into the merge writer and lets the existing
+  contract handle override automatically. The trade-off is that
+  the entity file alone can't tell "hand-locked" from
+  "correction-locked"; that distinction lives in SQLite and a
+  Phase 5 audit pass would surface it.
+- `corrections.entity_id` is FK-constrained, so corrections for
+  entities the worker hasn't seen yet apply to the vault but skip
+  the audit row. This is logged but quiet otherwise. If the audit
+  gap turns out to matter, a small SQLite migration drops the FK.
+
 ## 2026-05-13
 
 **Done:**

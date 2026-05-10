@@ -107,3 +107,44 @@ def merge_frontmatter(
         os.fsync(f.fileno())
     os.replace(tmp, path)
     return changed
+
+
+def apply_correction(path: Path, field_name: str, value: Any) -> bool:
+    """Set a field to a corrected value and add it to locked_fields.
+
+    The Phase 4c override path. Bypasses the freshness rule from the
+    merge contract entirely (corrections always win, by design — see
+    `examples/sample-vault/CONVENTIONS.md`). Adds the field to the
+    entity's `locked_fields:` list so future graduated-extractor or
+    Claude-fallback merges skip it. Atomic write, same temp+fsync+
+    os.replace discipline as `merge_frontmatter`.
+
+    Returns True if the file changed (value differed, or field was
+    newly added to locked_fields), False if the entity already
+    reflected the correction.
+    """
+    text = path.read_text(encoding="utf-8")
+    frontmatter, body = _split(text)
+
+    changed = False
+    if frontmatter.get(field_name) != value:
+        frontmatter[field_name] = value
+        changed = True
+
+    locked = list(frontmatter.get("locked_fields") or [])
+    if field_name not in locked:
+        locked.append(field_name)
+        frontmatter["locked_fields"] = locked
+        changed = True
+
+    if not changed:
+        return False
+
+    new_text = _serialize(frontmatter, body)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(new_text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    return True

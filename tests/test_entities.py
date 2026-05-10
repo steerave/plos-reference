@@ -256,3 +256,39 @@ def test_person_lookup_returns_none_when_no_people_dir(tmp_path):
         )
         is None
     )
+
+
+# -----------------------------------------------------------------------------
+# find_by_slug
+# -----------------------------------------------------------------------------
+
+
+def test_find_by_slug_resolves_property(tmp_path):
+    _property(tmp_path, "123-main-davenport", {"entity": "property"})
+    path = entities.find_by_slug("123-main-davenport", tmp_path)
+    assert path is not None
+    assert path.parent.name == "123-main-davenport"
+    assert path.parent.parent.name == "properties"
+
+
+def test_find_by_slug_resolves_account(tmp_path):
+    _account(tmp_path, "first-davenport-checking-4521", {"entity": "account"})
+    path = entities.find_by_slug("first-davenport-checking-4521", tmp_path)
+    assert path is not None
+    assert path.parent.parent.name == "accounts"
+
+
+def test_find_by_slug_resolves_person(tmp_path):
+    _person(tmp_path, "joe", {"entity": "person"})
+    path = entities.find_by_slug("joe", tmp_path)
+    assert path is not None
+    assert path.parent.parent.name == "people"
+
+
+def test_find_by_slug_returns_none_for_unknown(tmp_path):
+    _property(tmp_path, "real", {"entity": "property"})
+    assert entities.find_by_slug("nonexistent-slug", tmp_path) is None
+
+
+def test_find_by_slug_returns_none_when_no_source_dir(tmp_path):
+    assert entities.find_by_slug("123-main-davenport", tmp_path) is None
