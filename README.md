@@ -410,6 +410,51 @@ The script logs one line per applied entry and a final summary like `import_corr
 - **Cross-correction conflict detection.** Adding two corrections for the same entity+field with different values applies them in file order (the second overwrites the first on import). No warning is emitted.
 - **Auto-validation that the field name is sensible** (e.g. "did you typo `electic_account`?"). The script writes whatever you ask.
 
+## Quickstart — Phase 5 Slice 1 (anomalies compile pass)
+
+The second **compiled artifact** lands here. `python -m plos.compile_anomalies` walks the SQLite audit trail, identifies recurring numeric fields whose latest value deviates by more than 20% from a baseline of their prior three values, and shells out to the `claude` CLI to render a human-readable `compiled/anomalies.md`. **Statistics in Python, prose in Claude** — the deviation math is deterministic; Claude only renders the resulting list.
+
+This slice ships only the percentage-deviation heuristic. The full anomalies spec (expectation gaps + unexpected charges) lands in Slices 2–3 under the same artifact.
+
+### Prerequisites (in addition to Phase 4)
+
+- `tests\fixtures\sample_documents\` now emits four Acme bills (Jan/Feb/Mar/Apr 2026) instead of one. Re-run `python tests\fixtures\sample_documents\build.py` to materialise them; the existing April PDF is byte-identical to before.
+- The sample property `123-main-davenport` is already wired for Acme; no entity-level changes are needed.
+
+### Action — regenerate fixtures, consume, and compile
+
+```powershell
+# 1. Materialise the historical Acme bills (idempotent; the April one is unchanged).
+python tests\fixtures\sample_documents\build.py
+
+# 2. Drop all four Acme bills into Paperless consume/
+copy tests\fixtures\sample_documents\electric_acme_2026_*.pdf G:\plos-data\paperless\consume\
+
+# 3. Run the worker until all four lines show status=done (one pass usually catches them all).
+python -m plos.worker
+
+# 4. Run the anomalies compile pass.
+python -m plos.compile_anomalies
+```
+
+The script logs two lines (`invoking claude --print (N deviations, manifest length: M chars)` and `wrote ...anomalies.md`) and exits in 5–15s.
+
+### What success looks like
+
+1. **SQLite has four rows for `last_utility_bill_amount`** on the `123-main-davenport` entity in `extracted_fields`, each with a distinct `source_document_date` spanning Jan–Apr 2026.
+2. **`examples/sample-vault/compiled/anomalies.md` exists** with valid YAML frontmatter (`type: compiled`, `artifact: anomalies`, `refresh_cadence: monthly`, `compile_pass_version: 1`, `sources_read:` listing the cited path).
+3. **A `## Spending deviations` section** with one bullet citing `123-main-davenport`'s utility bill amount, the current value (~$142.37), the 3-month baseline mean (~$110.07), and a percentage delta of ~+29%.
+4. **A `→ /source/properties/123-main-davenport/index.md` arrow** under the bullet pointing to the entity.
+5. **Re-running with no new data** is safe — the deterministic empty-deviation short-circuit only fires when nothing crosses the 20% threshold; otherwise Claude re-renders the same fact-set in qualitatively similar prose.
+
+### What this does *not* do (deferred)
+
+- **Expectation-gaps section** (statement didn't arrive by the 20th of the month). Slice 2.
+- **Unexpected-charges section** (transaction with no matching subscription). Slice 3.
+- **Calendar-month windowing.** v1 uses the most-recent-record per `(entity, field)`. Slice 2 promotes to calendar windows when expectation-gaps land.
+- **Audit pass** against `sources_read:` vs body `→ /source/...` arrows. Still deferred until all three artifacts ship.
+- **Compile-pass scheduling.** Still manual via `python -m plos.compile_anomalies`. Phase 5 plumbing slice.
+
 ## License
 
 See [LICENSE](./LICENSE).

@@ -1,0 +1,542 @@
+"""
+Tests for the anomalies.md compile pass.
+
+The actual Claude CLI invocation is mocked. We test:
+- The deviation math (`compute_deviations`) end-to-end against a sqlite
+  in-memory database.
+- The wiring (`build_manifest`, `_validate_response`, atomic write,
+  empty-deviation short-circuit).
+
+Per CLAUDE.md Phase 5 Slice 1 conventions, statistics are computed in
+Python (deterministic), and Claude renders prose around the result.
+The tests reflect that split: math is exercised in unit tests; Claude's
+output is mocked.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from plos import compile_anomalies, db
+
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+
+def _write(path: Path, content: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def conn() -> sqlite3.Connection:
+    """In-memory SQLite with the four-table schema initialised."""
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    c.execute("PRAGMA foreign_keys = ON")
+    db.init_schema(c)
+    yield c
+    c.close()
+
+
+def _insert_entity(
+    conn: sqlite3.Connection,
+    *,
+    entity_type: str,
+    domain: str,
+    slug: str,
+    wiki_path: str,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO entities (type, domain, slug, wiki_path) VALUES (?, ?, ?, ?)",
+        (entity_type, domain, slug, wiki_path),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def _insert_document(
+    conn: sqlite3.Connection,
+    *,
+    paperless_id: int,
+    paperless_url: str,
+    document_date: str,
+) -> int:
+    cur = conn.execute(
+        """
+        INSERT INTO documents (paperless_id, paperless_url, document_date, status)
+        VALUES (?, ?, ?, 'done')
+        """,
+        (paperless_id, paperless_url, document_date),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def _insert_field(
+    conn: sqlite3.Connection,
+    *,
+    document_id: int,
+    entity_id: int,
+    field_name: str,
+    field_value: str,
+    source_document_date: str,
+    handler: str = "graduated:test",
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO extracted_fields
+            (document_id, entity_id, field_name, field_value, handler,
+             source_document_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            document_id,
+            entity_id,
+            field_name,
+            field_value,
+            handler,
+            source_document_date,
+        ),
+    )
+    conn.commit()
+
+
+def _seed_monthly_utility_history(
+    conn: sqlite3.Connection,
+    *,
+    amounts: list[tuple[str, str]],
+    slug: str = "123-main",
+    paperless_id_base: int | None = None,
+) -> int:
+    """Insert a sequence of (statement_date, amount) rows for last_utility_bill_amount.
+
+    Returns the entity_id used. Each row gets its own document row so
+    the JOIN on documents.id holds. `paperless_id_base` defaults to a
+    stable hash of the slug so two seedings with different slugs in the
+    same test don't collide on the UNIQUE constraint.
+    """
+    entity_id = _insert_entity(
+        conn,
+        entity_type="property",
+        domain="properties",
+        slug=slug,
+        wiki_path=f"source/properties/{slug}/index.md",
+    )
+    if paperless_id_base is None:
+        paperless_id_base = 100 + abs(hash(slug)) % 9000
+    for i, (date_, amount) in enumerate(amounts):
+        doc_id = _insert_document(
+            conn,
+            paperless_id=paperless_id_base + i,
+            paperless_url=(
+                f"http://localhost:8888/documents/{paperless_id_base + i}/"
+            ),
+            document_date=date_,
+        )
+        _insert_field(
+            conn,
+            document_id=doc_id,
+            entity_id=entity_id,
+            field_name="last_utility_bill_amount",
+            field_value=amount,
+            source_document_date=date_,
+        )
+    return entity_id
+
+
+@pytest.fixture
+def vault(tmp_path: Path) -> Path:
+    """Build a tmp vault with one property entity matching the seeded slug."""
+    root = tmp_path / "vault"
+    _write(
+        root / "source" / "properties" / "123-main" / "index.md",
+        "---\nentity: property\nslug: 123-main\n"
+        "address: 123 Main St, Davenport, IA\n---\n# 123 Main\n",
+    )
+    return root
+
+
+VALID_MOCK_RESPONSE = """\
+---
+type: compiled
+artifact: anomalies
+refreshed: 2026-05-10T12:00:00Z
+refresh_cadence: monthly
+sources_read:
+  - /source/properties/123-main/index.md
+compile_pass_version: 1
+---
+
+# Anomalies — May 2026
+
+## Spending deviations
+
+- **123 Main — utility bill amount: $142.37 vs 3-month avg $110.07.** Utilities ran ~29% over the recent baseline this period.
+  → /source/properties/123-main/index.md
+
+---
+*Generated by monthly anomalies compile pass. To regenerate: `compile anomalies`.*
+"""
+
+
+# -----------------------------------------------------------------------------
+# compute_deviations — math
+# -----------------------------------------------------------------------------
+
+
+def test_compute_deviations_empty_when_no_history(conn):
+    """No rows at all → no deviations."""
+    assert compile_anomalies.compute_deviations(conn) == []
+
+
+def test_compute_deviations_skips_groups_below_min_history(conn):
+    """Three rows (current + 2 priors) is one short of MIN_HISTORY=3 baseline."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-02-28", "100.00"),
+            ("2026-03-31", "100.00"),
+            ("2026-04-30", "142.37"),
+        ],
+    )
+    assert compile_anomalies.compute_deviations(conn) == []
+
+
+def test_compute_deviations_flags_29_percent_over_baseline(conn):
+    """The demo scenario: April $142.37 vs Jan–Mar mean ~$110.07 → +29%."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "108.42"),
+            ("2026-02-28", "112.18"),
+            ("2026-03-31", "109.61"),
+            ("2026-04-30", "142.37"),
+        ],
+    )
+    deviations = compile_anomalies.compute_deviations(conn)
+    assert len(deviations) == 1
+    d = deviations[0]
+    assert d.entity_slug == "123-main"
+    assert d.field_name == "last_utility_bill_amount"
+    assert d.current_value == pytest.approx(142.37)
+    assert d.baseline_value == pytest.approx((108.42 + 112.18 + 109.61) / 3)
+    assert d.delta_pct == pytest.approx(29.34, abs=0.5)
+    assert d.current_source_date == "2026-04-30"
+    assert d.current_paperless_url is not None
+    assert d.current_paperless_url.startswith("http://localhost:8888/documents/")
+    assert d.entity_wiki_path == "source/properties/123-main/index.md"
+
+
+def test_compute_deviations_does_not_flag_below_threshold(conn):
+    """19% delta sits below the 20% threshold and must be ignored."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "100.00"),
+            ("2026-02-28", "100.00"),
+            ("2026-03-31", "100.00"),
+            ("2026-04-30", "119.00"),  # +19%
+        ],
+    )
+    assert compile_anomalies.compute_deviations(conn) == []
+
+
+def test_compute_deviations_flags_negative_deviation(conn):
+    """A current value 30% below baseline is also an anomaly (abs threshold)."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "100.00"),
+            ("2026-02-28", "100.00"),
+            ("2026-03-31", "100.00"),
+            ("2026-04-30", "70.00"),  # -30%
+        ],
+    )
+    deviations = compile_anomalies.compute_deviations(conn)
+    assert len(deviations) == 1
+    assert deviations[0].delta_pct == pytest.approx(-30.0)
+
+
+def test_compute_deviations_ignores_disallowed_fields(conn):
+    """A 200% jump on last_paystub_ytd_gross must NOT be flagged (excluded by policy)."""
+    entity_id = _insert_entity(
+        conn,
+        entity_type="person",
+        domain="family",
+        slug="joe",
+        wiki_path="source/people/joe/index.md",
+    )
+    for i, (date_, amt) in enumerate(
+        [
+            ("2026-01-15", "10000.00"),
+            ("2026-02-15", "10000.00"),
+            ("2026-03-15", "10000.00"),
+            ("2026-04-15", "30000.00"),  # +200%
+        ]
+    ):
+        doc_id = _insert_document(
+            conn,
+            paperless_id=200 + i,
+            paperless_url=f"http://localhost:8888/documents/{200 + i}/",
+            document_date=date_,
+        )
+        _insert_field(
+            conn,
+            document_id=doc_id,
+            entity_id=entity_id,
+            field_name="last_paystub_ytd_gross",
+            field_value=amt,
+            source_document_date=date_,
+        )
+    assert compile_anomalies.compute_deviations(conn) == []
+
+
+def test_compute_deviations_sorted_by_absolute_delta_desc(conn):
+    """Multiple deviations come back in decreasing order of |delta_pct|."""
+    p_id = _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "100.00"),
+            ("2026-02-28", "100.00"),
+            ("2026-03-31", "100.00"),
+            ("2026-04-30", "125.00"),  # +25%
+        ],
+        slug="property-a",
+    )
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "100.00"),
+            ("2026-02-28", "100.00"),
+            ("2026-03-31", "100.00"),
+            ("2026-04-30", "160.00"),  # +60%
+        ],
+        slug="property-b",
+    )
+    deviations = compile_anomalies.compute_deviations(conn)
+    assert len(deviations) == 2
+    assert deviations[0].entity_slug == "property-b"
+    assert deviations[0].delta_pct == pytest.approx(60.0)
+    assert deviations[1].entity_slug == "property-a"
+    assert deviations[1].delta_pct == pytest.approx(25.0)
+
+
+def test_compute_deviations_skips_groups_with_zero_baseline(conn):
+    """A baseline of zero would explode the divisor; skip rather than raise."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "0.00"),
+            ("2026-02-28", "0.00"),
+            ("2026-03-31", "0.00"),
+            ("2026-04-30", "50.00"),
+        ],
+    )
+    assert compile_anomalies.compute_deviations(conn) == []
+
+
+def test_compute_deviations_uses_only_most_recent_3_priors(conn):
+    """Six priors plus a current — baseline is the 3 most recent priors only."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2025-11-30", "200.00"),  # noise — should not enter baseline
+            ("2025-12-31", "200.00"),
+            ("2026-01-31", "100.00"),
+            ("2026-02-28", "100.00"),
+            ("2026-03-31", "100.00"),
+            ("2026-04-30", "130.00"),  # +30% vs the 3-prior baseline of 100
+        ],
+    )
+    deviations = compile_anomalies.compute_deviations(conn)
+    assert len(deviations) == 1
+    assert deviations[0].baseline_value == pytest.approx(100.0)
+    assert deviations[0].delta_pct == pytest.approx(30.0)
+
+
+# -----------------------------------------------------------------------------
+# build_manifest
+# -----------------------------------------------------------------------------
+
+
+def test_build_manifest_empty_deviations_includes_marker(vault):
+    manifest = compile_anomalies.build_manifest(vault, deviations=[])
+    assert "Today's date (UTC):" in manifest
+    assert "_(no deviations this window)_" in manifest
+
+
+def test_build_manifest_renders_deviations_and_cited_entity(vault, conn):
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "108.42"),
+            ("2026-02-28", "112.18"),
+            ("2026-03-31", "109.61"),
+            ("2026-04-30", "142.37"),
+        ],
+    )
+    deviations = compile_anomalies.compute_deviations(conn)
+    manifest = compile_anomalies.build_manifest(vault, deviations=deviations)
+    assert "entity_slug: `123-main`" in manifest
+    assert "field: `last_utility_bill_amount`" in manifest
+    assert "current_value: 142.37" in manifest
+    assert "delta_pct: +29" in manifest
+    assert "/source/properties/123-main/index.md" in manifest
+    # The full entity index.md content is bundled in
+    assert "address: 123 Main St, Davenport, IA" in manifest
+
+
+# -----------------------------------------------------------------------------
+# _validate_response
+# -----------------------------------------------------------------------------
+
+
+def test_validate_response_accepts_valid_artifact():
+    compile_anomalies._validate_response(VALID_MOCK_RESPONSE)
+
+
+def test_validate_response_rejects_missing_frontmatter():
+    with pytest.raises(ValueError, match="frontmatter"):
+        compile_anomalies._validate_response("I can't help with that.")
+
+
+def test_validate_response_rejects_missing_spending_deviations_heading():
+    response = (
+        "---\ntype: compiled\nartifact: anomalies\n---\n\n"
+        "# Anomalies — May 2026\n\n## Some other heading\n"
+    )
+    with pytest.raises(ValueError, match="Spending deviations"):
+        compile_anomalies._validate_response(response)
+
+
+# -----------------------------------------------------------------------------
+# run() — empty-deviation short-circuit
+# -----------------------------------------------------------------------------
+
+
+def test_run_empty_deviations_short_circuits_without_calling_claude(
+    vault, conn, monkeypatch
+):
+    called = {"count": 0}
+
+    def fake_run(*args, **kwargs):
+        called["count"] += 1
+        raise AssertionError("subprocess.run must not be invoked for empty deviations")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    target = compile_anomalies.run(vault, conn)
+    assert called["count"] == 0
+
+    body = target.read_text(encoding="utf-8")
+    assert body.startswith("---\n")
+    assert "artifact: anomalies" in body
+    assert "refresh_cadence: monthly" in body
+    assert "compile_pass_version: 1" in body
+    assert "## Spending deviations" in body
+    assert "no deviations" in body.lower()
+    # Atomic write leaves no temp file
+    assert list(target.parent.glob("*.tmp")) == []
+
+
+# -----------------------------------------------------------------------------
+# run() — non-empty path invokes claude
+# -----------------------------------------------------------------------------
+
+
+def _seed_demo_history(conn):
+    """The Phase 5 Slice 1 demo data: 4 Acme bills, April is +29%."""
+    _seed_monthly_utility_history(
+        conn,
+        amounts=[
+            ("2026-01-31", "108.42"),
+            ("2026-02-28", "112.18"),
+            ("2026-03-31", "109.61"),
+            ("2026-04-30", "142.37"),
+        ],
+    )
+
+
+def test_run_invokes_claude_with_utf8_encoding(vault, conn, monkeypatch):
+    """The Windows cp1252 trap fixed in 69b9e62 must not regress here."""
+    _seed_demo_history(conn)
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        captured["input"] = kwargs.get("input")
+        return subprocess.CompletedProcess(cmd, 0, VALID_MOCK_RESPONSE, "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    compile_anomalies.run(vault, conn)
+
+    assert captured["cmd"][0] == "claude"
+    assert "--print" in captured["cmd"]
+    assert captured["kwargs"]["check"] is True
+    assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    # Manifest + deviation data reach the subprocess
+    assert "Pre-computed deviations" in captured["input"]
+    assert "123-main" in captured["input"]
+
+
+def test_run_writes_response_atomically(vault, conn, monkeypatch):
+    _seed_demo_history(conn)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0], 0, VALID_MOCK_RESPONSE, ""),
+    )
+    target = compile_anomalies.run(vault, conn)
+    assert target == vault / "compiled" / "anomalies.md"
+    assert target.read_text(encoding="utf-8") == VALID_MOCK_RESPONSE
+    assert list(target.parent.glob("*.tmp")) == []
+
+
+def test_run_preserves_existing_on_invalid_response(vault, conn, monkeypatch):
+    _seed_demo_history(conn)
+    target = vault / "compiled" / "anomalies.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("EXISTING", encoding="utf-8")
+
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(
+            a[0], 0, "I can't help with that.", ""
+        ),
+    )
+    with pytest.raises(ValueError, match="frontmatter"):
+        compile_anomalies.run(vault, conn)
+    assert target.read_text(encoding="utf-8") == "EXISTING"
+
+
+def test_run_propagates_subprocess_failure(vault, conn, monkeypatch):
+    _seed_demo_history(conn)
+
+    def fake_run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd, "", "claude: not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(subprocess.CalledProcessError):
+        compile_anomalies.run(vault, conn)
+    assert not (vault / "compiled" / "anomalies.md").exists()
+
+
+# -----------------------------------------------------------------------------
+# _resolve_vault_root
+# -----------------------------------------------------------------------------
+
+
+def test_resolve_vault_root_requires_env_var(monkeypatch):
+    monkeypatch.delenv("PLOS_VAULT_ROOT", raising=False)
+    with pytest.raises(RuntimeError, match="PLOS_VAULT_ROOT"):
+        compile_anomalies._resolve_vault_root()

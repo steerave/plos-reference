@@ -586,3 +586,129 @@ the correction predates any worker activity.
   corrections.md without piggybacking on the FK column. Phase 5+.
 - **Back-filling audit rows when the entity is later created by the
   worker.** Phase 5+ if needed.
+
+## Phase 5 Slice 1 conventions (decided during the anomalies compile pass)
+
+Phase 5 Slice 1 lands `compiled/anomalies.md`, the second compiled
+artifact and the first to use a *pre-computed manifest* (vs Phase 4's
+"hand Claude the raw vault and let it reason"). Decisions captured here
+so subsequent anomalies slices and the other Phase 5 compile passes
+extend the pattern.
+
+### Statistics in Python, prose in Claude
+
+The percentage-deviation math is pure arithmetic over the
+`extracted_fields` audit trail (rolling mean, delta-vs-baseline) and
+runs entirely in `compile_anomalies.compute_deviations`. The result is
+a list of `Deviation` records; Claude's job is to render each as a
+human-readable bullet under the `## Spending deviations` heading. This
+split:
+
+- Keeps detection deterministic — re-running with the same data
+  produces the same set of flagged anomalies; only the prose around
+  them varies.
+- Keeps the cost bounded — Claude is invoked at most once per compile
+  pass, with a pre-aggregated list, not the full audit history.
+- Makes the contract auditable — the deviation list is testable in
+  isolation against synthetic SQLite rows; the prompt is responsible
+  only for rendering, not analysis.
+
+Slices 2 and 3 (expectation gaps + unexpected charges) follow the same
+pattern: detect in Python, render in Claude.
+
+### `ELIGIBLE_FIELDS` allowlist as the policy surface
+
+`compile_anomalies.ELIGIBLE_FIELDS` is the policy register for which
+recurring numeric fields participate in deviation analysis. Slice 1
+ships with six entries (utility amount, mortgage amount, paystub
+gross/net, statement deposits/withdrawals). Three deliberate
+exclusions are documented inline:
+
+- `last_paystub_ytd_gross` — monotone across the year, deviation is
+  meaningless.
+- `last_statement_balance` — drifts with deposits/withdrawals; the
+  baseline isn't a stable comparison.
+- `last_utility_bill_kwh` — consumption, not money. A
+  kWh-vs-cost-decomposition heuristic is a Slice 2+ concern.
+
+Adding a new recurring-amount field to extractor output should be
+followed by one of: (a) add it to `ELIGIBLE_FIELDS`, (b) explicitly
+document why it doesn't qualify (excluded comment in the allowlist),
+(c) accept that it won't trip anomalies until step (a). No silent
+opt-in.
+
+### Named thresholds, not magic numbers
+
+`MIN_HISTORY = 3` (priors needed before any deviation can fire) and
+`DEVIATION_THRESHOLD_PCT = 20.0` are module-level constants. The
+20% threshold is straight from ARCHITECTURE.md; the 3-prior baseline
+is the smallest sample that produces a defensible mean. Both are
+overridable per `compute_deviations(..., min_history=..., threshold_pct=...)`
+for testing, but the default constants are the operating policy.
+
+### Empty-deviation short-circuit
+
+If `compute_deviations` returns an empty list, `run()` writes a
+deterministic "no deviations this window" artifact *without invoking
+Claude*. Two reasons:
+
+- Determinism. An empty result is a contractually flat fact, not a
+  synthesis task. Re-running on the same data produces byte-stable
+  output (modulo the `refreshed:` timestamp).
+- Cost. No reason to spend a subprocess + Claude tokens on rendering
+  "there's nothing here."
+
+The artifact still carries the full frontmatter contract (`type:
+compiled`, `artifact: anomalies`, `refresh_cadence: monthly`,
+`compile_pass_version: 1`, `sources_read: []`) and the
+`## Spending deviations` heading, so downstream readers (audit pass,
+notifications digest) see the same shape whether the artifact was
+machine-rendered or short-circuited.
+
+### Most-recent-record windowing in v1
+
+Slice 1 takes "the most recent row per `(entity, field)`" as the
+current value and the three rows immediately before as the baseline.
+There's no calendar-month framing — a current row from April 30
+compared against priors from Jan 31 / Feb 28 / Mar 31 just works.
+This is the simplest defensible windowing.
+
+When Slice 2 (expectation-gaps) lands, it needs calendar windows by
+design ("statement didn't arrive by the 20th of *the month it was
+due*"). At that point both heuristics will promote to a single
+calendar-month framing across the artifact. Until then, slicing on
+record position is cleaner than slicing on dates.
+
+### Sample data convention
+
+Phase 5 Slice 1's demo data lives in
+`tests/fixtures/sample_documents/`: four Acme Power & Light bills
+(Jan/Feb/Mar/Apr 2026). Amounts are `$108.42 / $112.18 / $109.61 /
+$142.37` — the Jan-Mar mean is `$110.07` and the April value is
++29.34% (the 0.34 over the 29% mark is what makes the test
+`test_compute_deviations_flags_29_percent_over_baseline` pin to
+~29.34, not exactly 29).
+
+`build_electric_bill_for(path, *, statement_date, service_period,
+kwh, amount, due_date)` is the parameterized builder; the old
+`build_electric_bill(path)` is now a thin wrapper that supplies the
+April values. The April PDF is byte-identical to its pre-Phase-5
+output (verified by SHA256).
+
+### Out of scope at end of Phase 5 Slice 1
+
+- **Expectation-gaps section** (statement didn't arrive by the 20th).
+  Requires per-entity expected-cadence frontmatter and a calendar-
+  windowed view. Slice 2.
+- **Unexpected-charges section.** Requires transaction-level
+  ingestion and a subscription registry. Slice 3+.
+- **Categorical aggregation** ("Dining out +49%"). Out of v1.
+- **Calendar-month windowing** ("Window: April 1 – April 30" framing
+  in the artifact body). Tied to Slice 2's expectation-gap math.
+- **Audit pass** — comparing `sources_read:` frontmatter against the
+  `→ /source/...` arrows in the body. Still deferred; sensible to
+  land after `tax-prep.md` so it covers the full three-artifact set.
+- **Compile-pass scheduling** (Windows Task Scheduler / Claude Code
+  remote agent). Still manual. Separate Phase 5 plumbing slice.
+- **`notifications.py` weekly digest** + **`indexer.py` review-queue
+  self-clean.** Separate Phase 5 slices.
