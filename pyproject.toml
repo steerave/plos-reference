@@ -39,6 +39,10 @@ dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.1",
+    # Phase 2 fixture builder: synthesizes the sample electric bill PDF.
+    "reportlab>=4.0",
+    # Phase 2 HTTP mocking for the Paperless API client tests.
+    "responses>=0.24",
 ]
 
 [tool.setuptools.packages.find]

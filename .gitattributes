@@ -13,3 +13,14 @@ scripts/post_consume_hook.py text eol=lf
 # Markdown stays text but lets git pick the platform-native ending so
 # Windows editors don't fight diffs on every save.
 *.md text
+
+# Binary fixtures (PDFs, images, the SQLite test DBs that live under
+# tests/fixtures/) must not be touched by line-ending or whitespace
+# normalization. Without this, autocrlf on Windows would corrupt them
+# on a fresh clone.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary
