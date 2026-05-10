@@ -1,5 +1,79 @@
 # Project Status Log
 
+## 2026-05-13
+
+**Done:**
+- Verified Phase 4 Slice 1 end-to-end on the live `claude` CLI:
+  `python -m plos.compile_this_week` produced a valid
+  `examples/sample-vault/compiled/this-week.md` in 12s with both
+  seeded deadline items prioritised correctly (Joe's drivers license
+  in **Must do**, State Farm renewal in **Should do**), each with a
+  `→ /source/...` provenance arrow, and the conventional footer.
+  One integration-only bug surfaced and got fixed in commit
+  `69b9e62` (`encoding="utf-8"` on `subprocess.run` — Windows
+  defaults to cp1252 which can't encode the `→` character).
+- Closed Phase 4b (pending_claude drain workflow):
+  - Added `src/plos/drain_pending_claude.py` —
+    `python -m plos.drain_pending_claude` walks every
+    `documents.status='pending_claude'` row, shells out to
+    `claude --print` per document with the OCR text + every entity
+    index.md as context, parses the JSON response (tolerating
+    \`\`\`json ... \`\`\` fencing), and dispatches:
+    - `route_status=matched` → `vault.merge_frontmatter` + status
+      `done` + `extracted_fields` audit rows tagged
+      `handler='claude'`.
+    - `route_status=unmatched_entity` → status `needs_review`,
+      JSON-encoded proposal (rationale + fields + proposed_entity
+      block) stored in `documents.review_reason` for a Phase 5+
+      review-queue renderer to consume.
+    - `route_status=unrecognized` → status `needs_review` with
+      reason `claude_unrecognized`.
+    - Invalid JSON / hallucinated entity / empty OCR / subprocess
+      crash all have explicit handling and tests.
+  - 14 unit tests cover all paths (matched / unmatched / unrecognized
+    / invalid JSON / empty OCR / hallucinated entity slug / multi-doc
+    loop / subprocess failure).
+  - Updated CHANGELOG, README (new "Phase 4b (pending_claude drain)"
+    quickstart), CLAUDE.md (new "Phase 4b conventions" section
+    documenting the structured JSON contract, `handler='claude'`,
+    the JSON-in-review_reason workaround for unmatched audit, and
+    the no-auto-creation invariant).
+- Test count: 142 passing in 0.85s (was 128 at end of Phase 4
+  Slice 1).
+
+**Next:**
+- Live demo of Phase 4b: run `python -m plos.drain_pending_claude`
+  on the user's machine. The MidAmerican bill at `paperless_id=3`
+  has been waiting in `pending_claude` since the Phase 2 demo and
+  is the live test case. Expected outcome: Claude extracts the gas
+  fields, fails to match an existing entity (the sample vault has
+  only 123-main-davenport, keyed to ACCT-12345 / Acme), and stores
+  the proposal in `review_reason`. Status flips
+  `pending_claude → needs_review`.
+- Phase 4c: `corrections.md` + `import_corrections.py`. Vault-edit-
+  then-import flow that lets a human override Claude's or a
+  graduated extractor's output for a specific entity+field.
+  Architecture pairs it with the drain under "the same session
+  pattern."
+- Phase 5: scheduling, the other two compiled artifacts
+  (`anomalies.md`, `tax-prep.md`), the audit pass against
+  `sources_read:`. MVP marker.
+
+**Notes:**
+- Phase 4b is the second place `subprocess.run([claude_cmd, "--print"])`
+  appears in the codebase. The pattern is now established enough
+  that further compile passes (`anomalies.md`, `tax-prep.md`) and
+  ad-hoc-question handlers will plug into the same shape:
+  build manifest → shell to claude → validate response → write
+  back atomically.
+- The schema's `extracted_fields.entity_id IS NOT NULL` constraint
+  forced a small architectural compromise in the unmatched-entity
+  branch — Claude's proposal lives in `documents.review_reason` as
+  a JSON blob rather than as proper audit-trail rows. Phase 5+
+  formalisation (when the audit-pass story lands) will likely drop
+  the NOT NULL via a small SQLite table-rebuild migration. Flagged
+  in the deferral list.
+
 ## 2026-05-12
 
 **Done:**

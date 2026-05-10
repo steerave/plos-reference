@@ -11,6 +11,32 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 4b — `pending_claude` drain workflow.** New
+  `python -m plos.drain_pending_claude` walks every
+  `documents.status='pending_claude'` row, shells out to the `claude`
+  CLI per document with the OCR text + every entity index.md as
+  context, asks for a structured JSON response (route_status, fields,
+  proposed entity), and either merges into the matched entity
+  (status -> `done`) or marks `needs_review` with Claude's full
+  proposal JSON-encoded into `documents.review_reason` for later
+  human triage. Same `--print` + `encoding="utf-8"` invocation pattern
+  as Phase 4 Slice 1's compile pass.
+- New `extracted_fields` rows for matched-by-Claude documents land
+  with `handler='claude'`, distinct from the four `graduated:*`
+  handlers Phase 2/3 introduced.
+- Per-document review-reason JSON shape for unmatched docs:
+  `{reason, doc_type, rationale, fields, proposed_entity}`. Keeps the
+  `documents.review_reason` TEXT column doing useful structured work
+  without a schema migration; Phase 5+ review-queue rendering will
+  consume it.
+- Failure modes covered explicitly: invalid JSON from Claude
+  (`review_reason='claude_invalid_response'`), empty OCR
+  (`empty_ocr_text`, no Claude call), hallucinated entity slugs
+  (`claude_unmatched_entity`), subprocess crash
+  (status untouched, retried next drain).
+- README quickstart gains a "Phase 4b (pending_claude drain)"
+  section.
+
 - **Phase 4 Slice 1 — `compiled/this-week.md` compile pass.** First
   compiled artifact in PLOS. New `python -m plos.compile_this_week`
   command builds a manifest of every entity index.md, every dashboard,

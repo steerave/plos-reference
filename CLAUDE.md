@@ -373,10 +373,108 @@ up `_schema/` formally.
 - **Compile-pass scheduling.** v1 is manual `python -m
   plos.compile_this_week`. Wiring up Windows Task Scheduler or a
   Claude Code remote agent is a deployment detail that fits Phase 5.
-- **`pending_claude` drain workflow.** Architecturally paired with
-  the compile pass under "the same session pattern." Phase 4b.
 - **`corrections.md` + `import_corrections.py`.** Vault-wide override
   file with provenance. Phase 4c.
 - **Audit pass against `sources_read:`.** Phase 5+.
 - **The other two compiled artifacts** (`anomalies.md`, `tax-prep.md`).
   Phase 5.
+
+## Phase 4b conventions (decided during the pending_claude drain build)
+
+Phase 4b adds the second use of the Claude Code CLI: long-tail
+extraction. Same shell-out pattern as the compile pass, different
+input/output contract.
+
+### One Claude call per pending document
+
+`drain_pending_claude.process_one(conn, row, vault_root)` shells out
+to `claude --print` per document, builds a per-doc prompt
+(preamble + entity manifest + OCR text + JSON-shape instruction),
+and parses Claude's response into a `ClaudeResult` dataclass. Cost
+is bounded by the number of pending docs — typically a handful at
+a time. No batching for v1 (each doc gets its own session, which
+also keeps the failure blast radius small).
+
+### Structured JSON contract
+
+Claude returns a JSON object with shape:
+
+```
+{
+  "doc_type": "<short snake_case label>",
+  "route_status": "matched" | "unmatched_entity" | "unrecognized",
+  "entity_type": "property" | "account" | "person" | ... | null,
+  "entity_slug": "<slug or null>",
+  "fields": { "<field>": <value>, ... },
+  "rationale": "<one-sentence explanation>",
+  "proposed_entity": { ... }   // only when unmatched_entity
+}
+```
+
+The parser tolerates `\`\`\`json ... \`\`\`` code-fence wrapping
+because Claude often emits JSON that way despite the prompt asking
+for plain JSON. Anything else — non-JSON, top-level non-object,
+unknown `route_status` — raises `ValueError` and the script marks
+the doc `needs_review` with reason `claude_invalid_response`.
+
+### handler = 'claude'
+
+`extracted_fields.handler` for Claude-extracted matches is the
+literal string `'claude'`, distinct from the four `graduated:*`
+handlers. The schema's example enum already named this; Phase 4b
+makes it real.
+
+### Unmatched proposals live in review_reason as JSON
+
+`extracted_fields.entity_id` is `NOT NULL` in the schema, so audit
+rows can't land for documents that didn't match an existing entity.
+Phase 4b's pragmatic workaround: JSON-encode Claude's full proposal
+(rationale + extracted fields + proposed entity skeleton) into the
+`documents.review_reason` TEXT column. The shape is:
+
+```json
+{
+  "reason": "claude_unmatched_entity",
+  "doc_type": "...",
+  "rationale": "...",
+  "fields": { ... },
+  "proposed_entity": { ... }
+}
+```
+
+A Phase 5+ review-queue renderer will consume this. Other
+review_reason values stay short single-token strings
+(`claude_unrecognized`, `claude_invalid_response`,
+`claude_matched_without_slug`, `empty_ocr_text`); only the
+unmatched-entity branch carries JSON.
+
+### Drain never auto-creates entities
+
+ARCHITECTURE.md is clear: "the worker never autonomously creates
+entity files; entity creation always happens through a Claude Code
+session with human review." Phase 4b's drain *is* a Claude Code
+session — but the script still doesn't auto-create. Claude
+*proposes* a new entity (the `proposed_entity` block); a human
+later applies the proposal. Phase 5+ stands up the formal
+apply-from-queue surface.
+
+### Subprocess failure leaves status untouched for retry
+
+Per the worker's pattern: any `subprocess.CalledProcessError` (or
+other exception in `process_one`) rolls back the open transaction
+and leaves `documents.status='pending_claude'`. The next drain
+run retries it. Counts are reported as
+`{'done': N, 'needs_review': M, 'errored': K}` at the end of the
+run, so transient failures stay visible in stdout.
+
+### Out of scope at end of Phase 4b
+
+- **Auto-applying `proposed_entity` blocks.** A human inspects the
+  review_reason JSON and decides. Phase 5+ tooling.
+- **`_review/queue.md` rendering.** Reading SQLite for queued
+  proposals and rendering them as a vault page is Phase 5+.
+- **`corrections.md` + `import_corrections.py`.** Phase 4c.
+- **Schema migration to allow `extracted_fields.entity_id IS NULL`.**
+  Would let unmatched audit rows land properly, but requires SQLite
+  table-rebuild migration on existing databases. Defer until the
+  audit-pass story (Phase 5) makes it load-bearing.

@@ -339,9 +339,36 @@ The script prints two log lines (`invoking claude --print (manifest length: N ch
 ### What this does *not* do (deferred)
 
 - Compile-pass scheduling. Cron/Task Scheduler integration is Phase 5.
-- Drain the `pending_claude` queue (the MidAmerican bill from Phase 2 is still waiting). Phase 4b.
 - `corrections.md` + `import_corrections.py` flow. Phase 4c.
 - The other two compiled artifacts (`anomalies.md`, `tax-prep.md`). Phase 5.
+
+## Quickstart — Phase 4b (pending_claude drain)
+
+The graduated extractors (Phases 2-3) handle four fictional providers — Acme Power & Light, Mr. Cooper, First Davenport Bank, Beacon Software. Real-world bills that don't match any of them route to `documents.status='pending_claude'` and wait. Phase 4b drains the queue.
+
+#### Action — run the drain
+
+```powershell
+python -m plos.drain_pending_claude
+```
+
+The script walks every `pending_claude` row in SQLite, shells out to `claude --print` per document with the OCR text plus every entity index.md as context, and asks for structured JSON back. It then either:
+
+- **Matched:** merges Claude's extracted fields into the matched entity's `index.md` via the standard merge contract; sets `documents.status='done'`; records the audit trail in `extracted_fields` with `handler='claude'`.
+- **Unmatched entity:** marks `needs_review` and JSON-encodes Claude's full proposal (extracted fields + proposed entity skeleton + rationale) into `documents.review_reason` for later human triage. The vault is not touched.
+- **Unrecognized:** marks `needs_review` with `review_reason='claude_unrecognized'`.
+
+Per ARCHITECTURE.md, this script never autonomously creates new entity files — entity creation always remains a human-reviewed step. Claude *proposes*; a human applies.
+
+### What success looks like
+
+Pre-existing `pending_claude` rows in SQLite get processed. The MidAmerican bill from Phase 2 (`paperless_id=3` in the user's local instance) is the natural live test: Claude extracts the gas/electric fields, but since the sample vault doesn't have a property the bill belongs to, it lands as `needs_review` with the proposal recorded. A summary line at exit reports counts (`{'done': N, 'needs_review': M, 'errored': 0}`).
+
+### What this does *not* do (deferred)
+
+- Auto-create new entity files from Claude's proposals. Phase 5+ stands up the formal review-queue surface and the human-in-the-loop apply step.
+- Render `_review/queue.md` in the vault. Phase 5.
+- The `corrections.md` + `import_corrections.py` flow. Phase 4c.
 
 ## License
 
