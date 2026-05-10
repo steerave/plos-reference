@@ -2,18 +2,21 @@
 # ----------------------------------------------------------------------
 # Register the PLOS scheduled tasks with Windows Task Scheduler.
 #
-# Each task invokes scripts/scheduled_run.py <task-name>, which records
-# the run in the `scheduled_runs` SQLite table and returns a non-zero
-# exit code if the wrapped module raised.
+# Uses the Schedule.Service COM API directly. PowerShell's
+# Register-ScheduledTask doesn't ship a working monthly-trigger surface
+# in all versions, and schtasks.exe's CLI parser doesn't round-trip
+# embedded quotes through PowerShell when the repo path contains
+# spaces. The COM API sidesteps both problems: trigger types, action
+# arguments, and principal settings are set as object properties, not
+# parsed from a command line.
 #
-# Run from the repo root with the venv created:
+# Run from the repo root:
 #   PS> .\scripts\install_schedules.ps1
 #
-# Each task runs under the *current user* account and only when the user
-# is logged on (default schtasks behaviour). For tasks that should run
-# while the user is logged off, edit the registered task in Task
-# Scheduler -> Properties -> Security options -> "Run whether user is
-# logged on or not", supply the account password, and accept the prompt.
+# Each task runs under the *current user* account and only when the
+# user is logged on (Interactive logon type). To run while logged off,
+# open the task in Task Scheduler -> Properties -> "Run whether user
+# is logged on or not" and provide the password.
 #
 # To remove the tasks again, run scripts/uninstall_schedules.ps1.
 # ----------------------------------------------------------------------
@@ -26,8 +29,8 @@ param(
     [switch]$WhatIf
 )
 
-# $PSScriptRoot is only reliably populated inside the script body, not
-# in the param block. Resolve defaults here.
+# Resolve defaults inside the body — $PSScriptRoot is not reliably
+# populated in the param block across all PowerShell versions.
 if (-not $RepoRoot) {
     $scriptDir = $PSScriptRoot
     if (-not $scriptDir) {
@@ -52,63 +55,124 @@ if (-not (Test-Path $WrapperScript)) {
     exit 1
 }
 
-# Schedule definitions.
-#
-# Each task command is exactly:
-#   "<PythonExe>" "<WrapperScript>" <module-name>
-# with surrounding quotes so paths containing spaces (e.g. "Claude
-# Projects") survive schtasks parsing.
-#
-# Schedule choices:
-#   - compile_anomalies (3:00 a.m.) runs before compile_this_week so the
-#     daily "Watching" section in this-week.md sees fresh anomaly state.
-#   - audit_pass (5:00 a.m. Sun) runs after the weekly settle.
-#   - notifications (8:00 a.m. Sun) runs after the audit so the digest
-#     can reference its findings in a later slice.
-#   - indexer (every 10 min) handles drain-resolution latency.
+# Task Scheduler COM constants.
+$TASK_TRIGGER_TIME    = 1   # one-time / repeating
+$TASK_TRIGGER_DAILY   = 2
+$TASK_TRIGGER_WEEKLY  = 3
+$TASK_TRIGGER_MONTHLY = 4
+$TASK_ACTION_EXEC               = 0
+$TASK_LOGON_INTERACTIVE_TOKEN   = 3
+$TASK_CREATE_OR_UPDATE          = 6
+$TASK_RUNLEVEL_LUA              = 0   # least-privilege
 
+# Day-of-week bitmask values for weekly triggers.
+$DOW_SUNDAY    = 0x01
+$DOW_MONDAY    = 0x02
+$DOW_TUESDAY   = 0x04
+$DOW_WEDNESDAY = 0x08
+$DOW_THURSDAY  = 0x10
+$DOW_FRIDAY    = 0x20
+$DOW_SATURDAY  = 0x40
+
+# Month-of-year bitmask. 4095 = all 12 months (2^0..2^11 = 0xFFF).
+$ALL_MONTHS = 0xFFF
+
+# Start dates use today as the boundary; for past times the scheduler
+# computes the next valid occurrence automatically.
+$today = (Get-Date -Format 'yyyy-MM-dd')
+
+function Set-CommonTaskSettings {
+    param($Settings)
+    $Settings.Enabled                = $true
+    $Settings.AllowDemandStart       = $true
+    $Settings.StartWhenAvailable     = $true
+    $Settings.DisallowStartIfOnBatteries = $false
+    $Settings.StopIfGoingOnBatteries     = $false
+    $Settings.ExecutionTimeLimit     = "PT1H"   # 1-hour timeout
+    $Settings.RunOnlyIfNetworkAvailable = $false
+    $Settings.MultipleInstances      = 2   # IgnoreNew
+}
+
+# Per-task spec. Each task carries one trigger-builder closure that
+# accepts the task's Triggers collection and adds a trigger to it.
 $Tasks = @(
     @{
-        Name     = "PLOS_compile_this_week"
-        Module   = "compile_this_week"
-        Schedule = "DAILY"
-        Time     = "06:00"
-        Extra    = @()
+        Name         = "PLOS_compile_this_week"
+        Module       = "compile_this_week"
+        Description  = "Daily compile pass for compiled/this-week.md"
+        AddTrigger   = {
+            param($triggers)
+            $t = $triggers.Create($TASK_TRIGGER_DAILY)
+            $t.StartBoundary = "${today}T06:00:00"
+            $t.Enabled = $true
+            $t.DaysInterval = 1
+        }
     },
     @{
-        Name     = "PLOS_compile_anomalies"
-        Module   = "compile_anomalies"
-        Schedule = "MONTHLY"
-        Time     = "03:00"
-        Extra    = @("/D", "1")  # 1st of every month
+        Name         = "PLOS_compile_anomalies"
+        Module       = "compile_anomalies"
+        Description  = "Monthly compile pass for compiled/anomalies.md (1st of month)"
+        AddTrigger   = {
+            param($triggers)
+            $t = $triggers.Create($TASK_TRIGGER_MONTHLY)
+            $t.StartBoundary = "${today}T03:00:00"
+            $t.Enabled = $true
+            $t.DaysOfMonth = 1   # 1st of month
+            $t.MonthsOfYear = $ALL_MONTHS
+        }
     },
     @{
-        Name     = "PLOS_compile_tax_prep"
-        Module   = "compile_tax_prep"
-        Schedule = "MONTHLY"
-        Time     = "04:00"
-        Extra    = @("/D", "1")  # 1st of every month
+        Name         = "PLOS_compile_tax_prep"
+        Module       = "compile_tax_prep"
+        Description  = "Monthly compile pass for compiled/tax-prep.md (1st of month)"
+        AddTrigger   = {
+            param($triggers)
+            $t = $triggers.Create($TASK_TRIGGER_MONTHLY)
+            $t.StartBoundary = "${today}T04:00:00"
+            $t.Enabled = $true
+            $t.DaysOfMonth = 1
+            $t.MonthsOfYear = $ALL_MONTHS
+        }
     },
     @{
-        Name     = "PLOS_audit_pass"
-        Module   = "audit_pass"
-        Schedule = "WEEKLY"
-        Time     = "05:00"
-        Extra    = @("/D", "SUN")
+        Name         = "PLOS_audit_pass"
+        Module       = "audit_pass"
+        Description  = "Weekly audit of compiled-artifact provenance (Sun)"
+        AddTrigger   = {
+            param($triggers)
+            $t = $triggers.Create($TASK_TRIGGER_WEEKLY)
+            $t.StartBoundary = "${today}T05:00:00"
+            $t.Enabled = $true
+            $t.DaysOfWeek = $DOW_SUNDAY
+            $t.WeeksInterval = 1
+        }
     },
     @{
-        Name     = "PLOS_notifications"
-        Module   = "notifications"
-        Schedule = "WEEKLY"
-        Time     = "08:00"
-        Extra    = @("/D", "SUN")
+        Name         = "PLOS_notifications"
+        Module       = "notifications"
+        Description  = "Weekly digest (Sun); dry-run unless PLOS_NOTIFY_SEND=1 in .env"
+        AddTrigger   = {
+            param($triggers)
+            $t = $triggers.Create($TASK_TRIGGER_WEEKLY)
+            $t.StartBoundary = "${today}T08:00:00"
+            $t.Enabled = $true
+            $t.DaysOfWeek = $DOW_SUNDAY
+            $t.WeeksInterval = 1
+        }
     },
     @{
-        Name     = "PLOS_indexer"
-        Module   = "indexer"
-        Schedule = "MINUTE"
-        Time     = "08:05"  # arbitrary start; recurs every 10 minutes
-        Extra    = @("/MO", "10")
+        Name         = "PLOS_indexer"
+        Module       = "indexer"
+        Description  = "Review-queue self-cleaner + queue.md renderer (every 10 min)"
+        AddTrigger   = {
+            param($triggers)
+            $t = $triggers.Create($TASK_TRIGGER_TIME)
+            $t.StartBoundary = "${today}T08:05:00"
+            $t.Enabled = $true
+            $t.Repetition.Interval = "PT10M"            # ISO-8601 duration
+            $t.Repetition.Duration = "P3650D"           # ~10 years
+            $t.Repetition.StopAtDurationEnd = $false
+        }
     }
 )
 
@@ -118,39 +182,60 @@ Write-Host "Python exe:     $PythonExe"
 Write-Host "Wrapper script: $WrapperScript"
 Write-Host ""
 
+$schedule = New-Object -ComObject "Schedule.Service"
+$schedule.Connect()
+$rootFolder = $schedule.GetFolder("\")
+
+$user = "$env:USERDOMAIN\$env:USERNAME"
+
 foreach ($task in $Tasks) {
-    # Quoting note: schtasks /TR receives a string. To embed quoted paths
-    # inside that string we wrap the whole TR in single quotes and use
-    # PowerShell's `"` to emit literal double quotes around each path.
-    $tr = "`"$PythonExe`" `"$WrapperScript`" $($task.Module)"
-
-    $args = @(
-        "/Create",
-        "/TN", $task.Name,
-        "/TR", $tr,
-        "/SC", $task.Schedule,
-        "/ST", $task.Time,
-        "/F"     # overwrite if a same-named task already exists
-    )
-    $args += $task.Extra
-
-    Write-Host "Registering $($task.Name) ($($task.Schedule) at $($task.Time))"
+    Write-Host "Registering $($task.Name)"
+    Write-Host "  $($task.Description)"
 
     if ($WhatIf) {
-        Write-Host "  (whatif) schtasks $($args -join ' ')"
+        Write-Host "  (whatif) RegisterTaskDefinition $($task.Name) for $user"
         continue
     }
 
-    & schtasks.exe @args
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "schtasks failed for $($task.Name) (exit $LASTEXITCODE)"
-        exit $LASTEXITCODE
+    $def = $schedule.NewTask(0)
+    $def.RegistrationInfo.Description = $task.Description
+    $def.RegistrationInfo.Author = "plos-reference install_schedules.ps1"
+
+    $def.Principal.UserId = $user
+    $def.Principal.LogonType = $TASK_LOGON_INTERACTIVE_TOKEN
+    $def.Principal.RunLevel = $TASK_RUNLEVEL_LUA
+
+    Set-CommonTaskSettings $def.Settings
+
+    & $task.AddTrigger $def.Triggers | Out-Null
+
+    $action = $def.Actions.Create($TASK_ACTION_EXEC)
+    $action.Path = $PythonExe
+    # Wrapping the wrapper-script path in double quotes survives intact
+    # through the COM API — no command-line reparsing happens.
+    $action.Arguments = "`"$WrapperScript`" $($task.Module)"
+    $action.WorkingDirectory = $RepoRoot
+
+    try {
+        $rootFolder.RegisterTaskDefinition(
+            $task.Name,
+            $def,
+            $TASK_CREATE_OR_UPDATE,
+            $user,
+            $null,
+            $TASK_LOGON_INTERACTIVE_TOKEN,
+            $null
+        ) | Out-Null
+    }
+    catch {
+        Write-Error "RegisterTaskDefinition failed for $($task.Name): $($_.Exception.Message)"
+        exit 1
     }
 }
 
 Write-Host ""
 Write-Host "Done. View registered tasks:"
-Write-Host "  schtasks /Query /FO LIST /V | findstr PLOS_"
+Write-Host "  Get-ScheduledTask -TaskName 'PLOS_*' | Format-Table TaskName, State, @{N='Next';E={(`$_.Triggers | Select-Object -First 1).StartBoundary}}"
 Write-Host "Inspect run history in SQLite:"
 Write-Host "  SELECT task_name, started_at, exit_status, error_summary"
 Write-Host "    FROM scheduled_runs ORDER BY id DESC LIMIT 20;"

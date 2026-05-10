@@ -3,10 +3,12 @@
 # Remove every PLOS scheduled task that scripts/install_schedules.ps1
 # registers with Windows Task Scheduler.
 #
+# Uses Unregister-ScheduledTask (the PowerShell-native API), matching
+# the install script. Idempotent: tasks that are absent print a skip
+# notice rather than failing the run.
+#
 # Run from the repo root:
 #   PS> .\scripts\uninstall_schedules.ps1
-#
-# Idempotent: missing tasks are reported but do not fail the run.
 # ----------------------------------------------------------------------
 
 [CmdletBinding()]
@@ -25,14 +27,18 @@ $TaskNames = @(
 
 foreach ($name in $TaskNames) {
     Write-Host "Removing $name"
+
     if ($WhatIf) {
-        Write-Host "  (whatif) schtasks /Delete /TN $name /F"
+        Write-Host "  (whatif) Unregister-ScheduledTask -TaskName $name -Confirm:`$false"
         continue
     }
-    & schtasks.exe /Delete /TN $name /F 2>$null
-    if ($LASTEXITCODE -ne 0) {
+
+    $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+    if (-not $existing) {
         Write-Host "  (no such task — skipping)"
+        continue
     }
+    Unregister-ScheduledTask -TaskName $name -Confirm:$false
 }
 
 Write-Host ""
