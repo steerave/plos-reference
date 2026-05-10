@@ -555,6 +555,48 @@ If `source/tax/<year>/expected-documents.md` doesn't exist for the resolved tax 
 - **Per-document linking back to Paperless.** Each `received_path` currently points to a vault file, not a Paperless URL. A future slice may add `paperless_url:` per entry.
 - **Audit pass** verifying `sources_read:` matches body `→ /source/...` arrows. Now ready to land — all three v1 compiled artifacts ship. Next slice.
 
+## Quickstart — Phase 5 Slice 4 (audit pass)
+
+The audit pass is the meta-layer that keeps the AI-synthesized artifacts honest. For each of the three v1 compiled artifacts (`this-week.md`, `anomalies.md`, `tax-prep.md`), it parses the body's `→ /source/...` arrow citations and the frontmatter's `sources_read:` list, then flags drift in three categories:
+
+- **undeclared_citation** — body cites a path but `sources_read:` doesn't list it. The AI synthesized from a source it didn't declare reading.
+- **unused_declaration** — `sources_read:` lists a path but the body never cites it. The AI read but didn't surface anything. Mild.
+- **nonexistent_citation** — body or frontmatter references a path that doesn't exist on disk. Catches AI path hallucination. Highest-value finding.
+
+The audit is pure deterministic Python; no Claude involvement.
+
+### Action — run the audit
+
+```powershell
+python -m plos.audit_pass
+```
+
+The report writes to `examples/sample-vault/_review/audit-report.md` (gitignored, regenerated each run).
+
+### What success looks like
+
+With the three demo artifacts the previous slices wrote:
+
+1. **`_review/audit-report.md` exists** with frontmatter declaring `artifact: audit-report`, `audited_count: 3`, all four `findings_*` counts at 0, `audit_pass_version: 1`.
+2. **Summary line:** `**All 3 audited artifacts passed.** Every → /source/... arrow is declared in sources_read:, every declared path is cited at least once, and every path resolves to an existing file in the vault.`
+3. **One section per artifact**, each with a `_(clean — N declared, M cited, no drift)_` marker.
+4. **No `.tmp` leak** in `_review/`.
+
+### What it looks like when drift exists
+
+If you manually edit `compiled/this-week.md` and either:
+- add an `→ /source/people/jane/index.md` arrow (where `jane` doesn't exist),
+- or remove an entry from `sources_read:` that the body still cites,
+
+the next `audit_pass` run produces a report with `findings_total: 1+`, the affected artifact gets its own section with bullet findings naming the drifting path, and the summary line counts the breakdown by category.
+
+### What this does *not* do (deferred)
+
+- **Strict-mode non-zero exit.** v1 always exits 0; findings live in the report. A `--strict` flag (or `PLOS_AUDIT_STRICT=1`) could promote findings to a non-zero exit for CI/cron pipelines. Defer until scheduling lands and the notifier hooks in.
+- **Glob-pattern path support.** Cited paths must be concrete (`/source/properties/123-main/index.md`); a path like `/source/properties/*/tax/` would be flagged as nonexistent. Future slice if the artifact templates start using globs.
+- **Cross-artifact provenance check.** Doesn't verify that `compiled/anomalies.md` cites paths whose timestamps make sense (e.g., extracted_fields rows that match its `refreshed:`). Out of v1.
+- **Auto-fix.** No "rewrite the artifact to make sources_read match body" command. The fix is to regenerate the artifact via its compile pass.
+
 ## License
 
 See [LICENSE](./LICENSE).

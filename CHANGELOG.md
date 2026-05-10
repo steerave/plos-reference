@@ -11,6 +11,30 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 5 Slice 4 — audit pass.** New `python -m plos.audit_pass`
+  verifies every compiled artifact's provenance contract. For each
+  of the three v1 artifacts (`this-week.md`, `anomalies.md`,
+  `tax-prep.md`), it parses the body's `→ /source/...` arrow
+  citations and the frontmatter's `sources_read:` list, then flags
+  drift in three categories: `undeclared_citation` (body cites a
+  path not in `sources_read:`), `unused_declaration`
+  (`sources_read:` lists a path the body never cites),
+  `nonexistent_citation` (a path referenced anywhere in the
+  artifact doesn't resolve on disk — AI path hallucination). Pure
+  deterministic Python; no Claude. Report writes to
+  `_review/audit-report.md` (gitignored alongside `compiled/`).
+  Always exits 0 in v1; findings live in the report.
+- **22 new tests** in `tests/test_audit_pass.py` covering frontmatter
+  parsing (split, missing, unclosed), `sources_read:` extraction
+  (list/missing/malformed YAML), arrow-citation regex, each of the
+  three drift categories in isolation and combined, clean-pass,
+  missing-frontmatter handling, `audit_all` skip-missing-artifacts,
+  report rendering (clean, empty vault, drift), atomic write +
+  overwrite, env-var failure. Suite total: 252 passing.
+- **`_review/` directory pattern.** Added to `.gitignore` alongside
+  `compiled/`. v1 carries a single `audit-report.md`; future
+  review-queue work (Phase 5+) will share the directory.
+
 - **Phase 5 Slice 3 — `compiled/tax-prep.md` (per-year inventory
   gap-surfacer).** The third and final compiled artifact in the
   PLOS v1 set. New `python -m plos.compile_tax_prep` reads a

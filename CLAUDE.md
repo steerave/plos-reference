@@ -936,3 +936,119 @@ self-documents what's missing.
   references). Phase 6+.
 - **Audit pass.** Now unblocked — all three v1 artifacts ship.
   Next slice.
+
+## Phase 5 Slice 4 conventions (decided during the audit-pass build)
+
+Phase 5 Slice 4 lands the audit pass — `python -m plos.audit_pass` —
+the meta-layer that keeps the AI-synthesized compiled artifacts
+honest. With the v1 three-artifact set in place (this-week.md,
+anomalies.md, tax-prep.md), every artifact's provenance contract
+can now be verified deterministically.
+
+The audit is **pure Python**. No Claude. No statistics. Just
+parsing + set comparison + file existence checks. That's the right
+shape for a check that has to be reliably callable from CI / cron
+and that has to NOT introduce its own new failure modes.
+
+### Three drift categories
+
+Per the design principle "Source provenance inline" in
+ARCHITECTURE.md / CONVENTIONS.md, every compiled artifact must
+cite its sources both ways:
+
+1. Inline in the body via `→ /<vault-path>` arrows under each
+   bullet.
+2. Declaratively in the frontmatter's `sources_read:` list.
+
+The audit flags drift between these two surfaces in three
+categories, encoded in `FindingCategory`:
+
+- `UNDECLARED_CITATION` — body has an arrow to a path not in
+  `sources_read:`. The AI synthesized from an undeclared source.
+  Concerning.
+- `UNUSED_DECLARATION` — `sources_read:` lists a path the body
+  never cites. The AI read but didn't surface. Mild but worth
+  knowing.
+- `NONEXISTENT_CITATION` — a path referenced in the artifact (in
+  the arrow set OR the declared set) doesn't resolve to a real
+  file in the vault. AI path hallucination. Highest signal.
+
+The fourth category considered in design — "manifest-bundled
+source that's neither cited nor declared" — was rejected: the
+manifest bundles many sources for context, and not all are meant
+to be cited. Flagging them would be noise.
+
+### Audited set is hardcoded in v1
+
+`AUDITED_ARTIFACTS` is the tuple of three compiled artifact paths,
+hardcoded as a module-level constant. v1 audits exactly the v1
+set. Future slices could:
+
+- Glob `compiled/*.md` for auto-discovery (premature; adding an
+  artifact is rare).
+- Add a CLI flag to audit a single artifact (premature; the
+  whole-set audit is fast).
+
+For now, adding an artifact means one extra entry in
+`AUDITED_ARTIFACTS`. Same shape as the extractor registry's
+"adding is one line."
+
+### Missing artifacts are silently skipped
+
+If `compiled/this-week.md` doesn't exist yet (fresh install,
+compile pass hasn't run), `audit_all` skips it with an INFO log
+line. That's the right default — a missing artifact is the user's
+problem to investigate (probably "run the compile pass"), not a
+finding worth surfacing in the audit report.
+
+### Report shape
+
+`_render_report` emits a single markdown document with frontmatter
+declaring the run timestamp + per-category counts, then one
+section per audited artifact. Clean artifacts get a one-line
+`_(clean — N declared, M cited, no drift)_` marker. Artifacts
+with findings get bullet lists, one per finding, with the
+category as a bolded label and the path as inline code.
+
+The report writes to `_review/audit-report.md`, gitignored in the
+public reference repo (same treatment as `compiled/`). The
+operating instance keeps its own report locally.
+
+### No strict-mode exit code in v1
+
+`run()` always returns the report path + the result list; the
+process always exits 0. Findings live in the report itself.
+Slice 5+ (scheduling + notifications) is the right place to
+wire failure signaling — e.g., the weekly digest reads the
+report's `findings_total:` and surfaces it.
+
+A `--strict` flag (or `PLOS_AUDIT_STRICT=1` env var) is the
+natural future addition for CI/cron paths that want a non-zero
+exit on findings. Defer until that consumer exists.
+
+### Frontmatter parsing reuses the `yaml` lib directly
+
+No new utility — `audit_pass.py` carries its own `_split_frontmatter`
+and `_parse_frontmatter_sources` helpers. These mirror but don't
+import the entities / vault helpers, same as the compile_*
+modules. Three copies of nearly-identical frontmatter splitters
+now exist (compile_tax_prep, entities, audit_pass — plus
+vault.merge_frontmatter has its own variant). A `plos.frontmatter`
+shared module is a candidate Phase 5+ refactor, but only if a
+fifth call site lands.
+
+### Out of scope at end of Phase 5 Slice 4
+
+- **Strict-mode exit code.** Wire in when scheduling/notifications
+  land.
+- **Glob-pattern path support.** v1 expects concrete paths in
+  arrows. A path like `/source/properties/*/tax/` would flag as
+  nonexistent.
+- **Cross-artifact provenance** (e.g., verifying that
+  `anomalies.md`'s `refreshed:` matches the SQLite state it
+  claims to read). Out of v1.
+- **Auto-fix.** No "rewrite the artifact to align sources_read
+  with body" command. The fix is to re-run the compile pass.
+- **History / trend analysis** (audit-report-over-time).
+  Reasonable next step if the user wants to track drift across
+  runs, but premature until findings actually accumulate.
