@@ -60,6 +60,16 @@ CREATE TABLE IF NOT EXISTS corrections (
   source_document_id INTEGER,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_runs (
+  id INTEGER PRIMARY KEY,
+  task_name TEXT NOT NULL,
+  started_at TIMESTAMP NOT NULL,
+  completed_at TIMESTAMP,
+  exit_status TEXT,
+  error_summary TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -75,6 +85,12 @@ def connect(path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    """Create the four tables. Safe to call repeatedly."""
+    """Create the schema tables. Safe to call repeatedly.
+
+    Five tables: `documents`, `entities`, `extracted_fields`,
+    `corrections`, `scheduled_runs`. `CREATE TABLE IF NOT EXISTS`
+    semantics mean existing databases pick up newly-added tables
+    on the next call without a migration step.
+    """
     conn.executescript(SCHEMA_SQL)
     conn.commit()

@@ -11,6 +11,48 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 5 Slice 7 — scheduling (MVP marker complete).** New
+  `scripts/scheduled_run.py` wrapper that takes a task name
+  (one of `compile_this_week`, `compile_anomalies`,
+  `compile_tax_prep`, `audit_pass`, `notifications`, `indexer`),
+  pins working directory to the repo root, records the run in a
+  new `scheduled_runs` SQLite table, imports `plos.<task>`,
+  calls `main()`, updates the row with `success`/`error` and
+  `error_summary`, exits 0/1/2 with deliberate meaning (0
+  success, 1 wrapped exception, 2 unknown task). Plus
+  `scripts/install_schedules.ps1` and
+  `scripts/uninstall_schedules.ps1` — PowerShell scripts that
+  register / unregister the six recurring tasks with Windows
+  Task Scheduler in one command. Daily / Monthly / Weekly /
+  every-10-minute frequencies per the architecture's dependency
+  graph (anomalies before this-week, audit before notifications,
+  indexer every 10 minutes).
+- **`scheduled_runs` SQLite table** in `db.SCHEMA_SQL` — fifth
+  table joining `documents`, `entities`, `extracted_fields`,
+  `corrections`. Carries one row per scheduled invocation
+  (task_name, started_at, completed_at, exit_status,
+  error_summary). `CREATE TABLE IF NOT EXISTS` semantics; the
+  wrapper calls `db.init_schema()` defensively, so existing
+  databases pick up the new table on first scheduled run with
+  zero migration work.
+- **7 new tests** in `tests/test_scheduled_run.py` covering
+  `run_task` (records success row, records error on raise,
+  honours SystemExit exit codes, success on `SystemExit(0)`,
+  unknown task returns exit code 2 with no row inserted),
+  `TASKS` map (every entry imports cleanly and has a callable
+  `main()`), `_record_start` (creates `scheduled_runs` table
+  on a fresh database). Suite total: 307 passing.
+
+- **Phase 5 (MVP marker) complete.** With this slice the v1
+  architecture ships end-to-end: hot-path extractors (Phase 2-3),
+  Claude long-tail drain + corrections (Phase 4), three compiled
+  artifacts + audit pass + weekly digest + review-queue
+  self-cleaner (Phase 5), scheduling. The only deliberately-
+  deferred items from the original Phase 5 list are anomalies
+  Slice 3 (unexpected charges, needs transaction-level
+  ingestion) and the "what is deliberately not in v1" list from
+  ARCHITECTURE.md.
+
 - **Phase 5 Slice 6 — `plos.indexer` review-queue self-cleaner +
   queue-page renderer.** New `python -m plos.indexer` does two
   things: (1) scans `documents.status='needs_review'` for rows

@@ -1302,3 +1302,155 @@ manual invocation works the same way.
   drops the row but reports `resolved_this_run` for one pass
   of context. Future passes will report 0 once nothing new
   resolves — that's correct.
+
+## Phase 5 Slice 7 conventions (decided during the scheduling build)
+
+Phase 5 Slice 7 wires the six recurring PLOS passes into Windows
+Task Scheduler. With this slice the **MVP marker is complete** —
+the system runs unattended end-to-end (modulo the worker, which
+is a long-running process the user starts separately).
+
+### Single entry point — `scripts/scheduled_run.py`
+
+Every scheduled task — `compile_this_week`, `compile_anomalies`,
+`compile_tax_prep`, `audit_pass`, `notifications`, `indexer` —
+runs via the same wrapper:
+
+    python scripts/scheduled_run.py <task-name>
+
+The wrapper:
+
+1. **Pins working directory** to the repo root via `os.chdir(REPO_ROOT)`
+   before any import that touches `.env` or relative paths. The
+   scheduler may launch us from anywhere; this makes the cwd
+   deterministic.
+2. **Records the run** in a new `scheduled_runs` SQLite table:
+   `task_name`, `started_at`, `completed_at`, `exit_status`
+   (`success`/`error`/`running` transient), `error_summary`
+   (one-line `<ExcType>: <message>` if errored, truncated to 500
+   chars).
+3. **Imports and calls main()** via `importlib.import_module(TASKS[name])`.
+   No dynamic eval; the `TASKS` dict is the only source of truth
+   for which names map to which modules.
+4. **Exits 0/1/2** with deliberate meaning:
+   - 0 = wrapped task completed cleanly
+   - 1 = wrapped task raised (or `SystemExit(non-zero)`)
+   - 2 = unknown task name (the schedule itself is misconfigured)
+   Task Scheduler reports the exit code; tooling can distinguish
+   "task ran and failed" from "the registration is wrong."
+
+`SystemExit(0)` is a clean exit (some `main()`s in stdlib idiom
+call `sys.exit(0)`). Non-zero `SystemExit` is an error.
+
+### Short-lived audit connections
+
+The wrapper opens `db.connect()` only to insert the start row and
+again to update the finish row. Between those, the wrapped task
+opens its own connection if it needs one (compile_anomalies,
+notifications, indexer all do). Avoiding a long-held connection
+during task execution sidesteps any SQLite locking surprises.
+
+### Schema migration is implicit
+
+Adding `scheduled_runs` to `SCHEMA_SQL` uses `CREATE TABLE IF NOT
+EXISTS`, the same pattern as the other four tables. Existing
+databases pick up the new table on the next `db.init_schema()`
+call — the wrapper calls it defensively before its first INSERT,
+so the very first scheduled run after deployment self-migrates.
+
+No migration script. No explicit version table. The
+"five tables, additive only" property of the schema makes this
+safe.
+
+### Scheduling order matters within the day
+
+The dependency graph:
+
+- `compile_anomalies` (3 a.m. on the 1st) must precede
+  `compile_this_week` (6 a.m. daily) so the daily "Watching"
+  section can see fresh anomaly state. The anomaly compile pass
+  is monthly; on non-1st days it doesn't fire, and this-week
+  reads whatever was last written.
+- `audit_pass` (5 a.m. Sun) runs after the weekly settle so all
+  three artifacts (`this-week.md`, `anomalies.md`,
+  `tax-prep.md`) are at their freshest.
+- `notifications` (8 a.m. Sun) runs after the audit so a future
+  digest slice can surface drift findings.
+- `indexer` (every 10 min) is independent — it polls SQLite for
+  newly-resolvable rows.
+
+Times are local (schtasks default). For a household laptop, local
+matches the user's intuition; UTC would be more portable but the
+operating instance is one machine in one timezone.
+
+### Windows-only in v1
+
+The scheduling layer is the only Windows-specific module in PLOS.
+The rest of the codebase is portable Python. macOS launchd /
+Linux cron equivalents are mechanical to write (the wrapper itself
+is unchanged; only the registration script differs) but out of v1.
+
+### Run-as-logged-on default
+
+`schtasks /Create` registers tasks under the current user, runs
+only when logged on. To run while logged off, the user manually
+flips "Run whether user is logged on or not" in Task Scheduler
+properties and supplies the account password. The install script
+documents this rather than handling it automatically — interactive
+password prompts in PowerShell get awkward, and most household
+scenarios don't need the logged-off mode (the laptop is on when
+the user is using it).
+
+### The worker is not scheduled
+
+The long-running `python -m plos.worker` poll loop sits outside
+this slice. It's a continuous process, not a one-shot — Task
+Scheduler can run continuous tasks but a Windows service via NSSM
+(or a shortcut in `shell:startup`) is the more idiomatic answer.
+The install script doesn't try to start the worker. Documenting
+this trade-off rather than papering over it.
+
+### Phase 5 MVP marker — DONE
+
+With Slice 7 registered, the v1 architecture is complete:
+
+- **Hot path** — graduated extractors handle four document types
+  through the worker, write entity frontmatter atomically, log
+  every claim to `extracted_fields`.
+- **Long tail** — `pending_claude` drain delegates the rest to
+  Claude per-document, captures structured proposals for review.
+- **Compiled artifacts** — three artifacts (`this-week.md`,
+  `anomalies.md`, `tax-prep.md`) regenerate via Claude on schedule.
+- **Provenance audit** — the audit pass catches drift between
+  declared and cited sources.
+- **Corrections** — vault-edit-then-import flow with locked-field
+  semantics.
+- **Delivery** — weekly digest email (one section in v1).
+- **Review queue** — `_review/queue.md` plus self-cleaning
+  indexer.
+- **Scheduling** — six recurring tasks via Windows Task Scheduler.
+
+Phase 6+ items (CLI query wrapper, MCP server, Obsidian plugin)
+are out of scope by design.
+
+### Out of scope at end of Phase 5 Slice 7
+
+- **Worker as a Windows service.** NSSM / service wrapper is a
+  deployment detail, not a code change. Document it; don't
+  automate.
+- **Cross-platform scheduling.** macOS / Linux registration
+  scripts. Wrapper is portable already.
+- **Failure surfacing in the digest.** `notifications.py` would
+  query `scheduled_runs` for recent errors and include a section.
+  Slice 5 deferred the multi-source digest body; this is part of
+  that future scope.
+- **Backfill / catch-up.** schtasks doesn't retroactively run
+  missed scheduled times unless per-task properties are flipped.
+  No code change needed — set the option in Task Scheduler
+  properties per task as desired.
+- **Run history viewer.** A `python -m plos.schedules` command
+  to summarise the audit table. Useful but defer; `sqlite3` works.
+- **Per-task env overrides.** Every task runs with the same `.env`.
+  If you wanted, e.g., a "test" notifications schedule that sends
+  to a different `PLOS_NOTIFY_TO`, you'd register a second
+  registered task with a wrapper variant or a CLI flag. Defer.

@@ -721,6 +721,88 @@ The indexer adds `'resolved'` to the `documents.status` taxonomy:
 - **Action hints per reason in the queue page.** Each section has a heading but no "what to do next" prose. Could be added once real review-queue traffic shapes what hints are useful.
 - **Resolution via fuzzy slug match.** v1 is exact-match-only. If Claude proposes `123-main` but the user creates `123-main-street`, the indexer doesn't notice.
 
+## Quickstart — Phase 5 Slice 7 (scheduling — MVP marker)
+
+Wire all six recurring PLOS passes into Windows Task Scheduler. With this slice the system runs unattended — `python -m ...` invocations stop being a thing you have to remember.
+
+### What gets scheduled
+
+| Task | Frequency | Time | Module |
+|------|-----------|------|--------|
+| `PLOS_compile_this_week` | Daily | 06:00 | `plos.compile_this_week` |
+| `PLOS_compile_anomalies` | Monthly (1st) | 03:00 | `plos.compile_anomalies` |
+| `PLOS_compile_tax_prep`  | Monthly (1st) | 04:00 | `plos.compile_tax_prep` |
+| `PLOS_audit_pass`        | Weekly (Sun)  | 05:00 | `plos.audit_pass` |
+| `PLOS_notifications`     | Weekly (Sun)  | 08:00 | `plos.notifications` |
+| `PLOS_indexer`           | Every 10 min  | 08:05 start | `plos.indexer` |
+
+Times are local. Ordering matters within the day: anomalies before this-week (so the daily Watching section sees fresh anomaly state), audit before notifications (so the digest can later surface drift findings — Slice 6 deferral). The Phase 1 worker (`python -m plos.worker`) is NOT scheduled — it's a long-running poll loop and you start it yourself (e.g., on login via a shortcut, or as a Windows service).
+
+### One-time setup
+
+```powershell
+# Register all six tasks. Run from the repo root.
+.\scripts\install_schedules.ps1
+
+# Dry-run first if you want to see exactly what gets registered:
+.\scripts\install_schedules.ps1 -WhatIf
+
+# View the registered tasks:
+schtasks /Query /FO LIST /V | findstr PLOS_
+```
+
+### What the wrapper does
+
+Each scheduled task invokes `scripts/scheduled_run.py <task-name>` rather than `python -m plos.<module>` directly. The wrapper:
+
+1. Pins working directory to the repo root so `.env` loads consistently regardless of how the scheduler launches it.
+2. Records the run in a new `scheduled_runs` SQLite table with `task_name`, `started_at`, `completed_at`, `exit_status` (`success` / `error`), and `error_summary` if anything raised.
+3. Imports the module and calls its `main()`.
+4. Exits 0 on clean success, 1 on a wrapped exception, 2 on an unknown task name (so Task Scheduler can distinguish "task ran and failed" from "the schedule itself is misconfigured").
+
+You can run it manually anytime: `python scripts/scheduled_run.py audit_pass`. Useful for verifying the wrapper before committing to the schedule.
+
+### Inspect run history
+
+```powershell
+sqlite3 G:\plos-data\plos\plos.db "SELECT task_name, started_at, exit_status, error_summary FROM scheduled_runs ORDER BY id DESC LIMIT 20;"
+```
+
+Every scheduled run lands a row. Useful when something didn't fire as expected — Task Scheduler's own logs are in Event Viewer (`Applications and Services Logs → Microsoft → Windows → TaskScheduler`).
+
+### Caveats
+
+- Tasks run **only when the user is logged on** by default. To run while logged off, edit each task in Task Scheduler → Properties → Security options → "Run whether user is logged on or not"; you'll have to supply the account password (Windows stores it encrypted per-machine).
+- The `MINUTE` schedule for `PLOS_indexer` uses `/MO 10` — every 10 minutes. Task Scheduler still honours the laptop's sleep state; if the laptop sleeps, the task waits for wake.
+- The PowerShell scripts use literal task names (`PLOS_*`). If you rename them, update both `install_schedules.ps1` and `uninstall_schedules.ps1`.
+
+### Remove
+
+```powershell
+.\scripts\uninstall_schedules.ps1
+```
+
+### What this does *not* do (deferred)
+
+- **Auto-start the long-running worker** (`python -m plos.worker`). Different beast — a continuous poll loop, not a one-shot. A Windows service / NSSM wrapper is the right pattern; out of v1.
+- **Failure notifications.** A failed scheduled run records `exit_status='error'` in SQLite. The `notifications.py` digest doesn't yet surface those failures (Slice 5 deferred this). Manual `SELECT` against `scheduled_runs` is the workaround for now.
+- **Schedule history viewer.** No `python -m plos.schedules` command to show recent runs. Use sqlite3 (or the future Phase 6+ Dataview dashboard over `scheduled_runs`).
+- **Backfill / catch-up runs.** If the laptop is off when a task should fire, schtasks doesn't retroactively run it. Per-task "run if scheduled time was missed" is a Task Scheduler property you can flip manually.
+- **Cross-platform support.** Windows Task Scheduler only. macOS launchd / Linux cron equivalents are mechanical to write but out of v1.
+
+### Phase 5 (MVP marker) complete
+
+With scheduling registered, Phase 5 is complete:
+
+- ✅ `compiled/anomalies.md` (Slice 1: deviations, Slice 2: expectation gaps)
+- ✅ `compiled/tax-prep.md` (Slice 3)
+- ✅ Audit pass (Slice 4)
+- ✅ `notifications.py` weekly digest (Slice 5)
+- ✅ `indexer.py` + `_review/queue.md` (Slice 6)
+- ✅ Scheduling (Slice 7)
+
+What's not in v1 / Phase 5: Anomalies Slice 3 (unexpected charges) — needs transaction-level ingestion. The rest of the architecture's "what is deliberately not in v1" list still applies.
+
 ## License
 
 See [LICENSE](./LICENSE).
