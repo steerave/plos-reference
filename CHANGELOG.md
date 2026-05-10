@@ -11,6 +11,42 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 5 Slice 3 — `compiled/tax-prep.md` (per-year inventory
+  gap-surfacer).** The third and final compiled artifact in the
+  PLOS v1 set. New `python -m plos.compile_tax_prep` reads a
+  user-maintained inventory file at
+  `source/tax/<year>/expected-documents.md`, partitions its
+  `expected:` list into received vs. missing by the `received:
+  bool` flag, and shells out to the `claude` CLI to render
+  `compiled/tax-prep.md` with `## Received` and `## Missing`
+  sections plus a `**Status:**` line. Same statistics-in-Python /
+  prose-in-Claude split as `compile_anomalies.py`. Inventory-
+  missing short-circuit: when no inventory file exists for the
+  resolved tax year, a deterministic "no inventory configured"
+  artifact is written without invoking Claude.
+- **Tax-year auto-resolution.** `_default_tax_year(as_of)`
+  returns the previous calendar year during Jan-Apr (the filing
+  window) and the current calendar year May-Dec (the collection
+  window), matching the US individual tax calendar. Override
+  with `PLOS_TAX_YEAR=YYYY`; malformed values raise.
+- **Sample-vault demo inventory.**
+  `examples/sample-vault/source/tax/2026/expected-documents.md`
+  ships with five entries (W-2 Beacon, 1098 Mr. Cooper,
+  1099-INT First Davenport, property tax 123 Main, charitable
+  receipts) — two marked received, three missing — plus two
+  stub `received/` files so the artifact's provenance arrows
+  resolve to real vault files.
+- **26 new tests** in `tests/test_compile_tax_prep.py` covering
+  `_default_tax_year` math (filing window, collection window),
+  `compute_tax_prep` (missing inventory, partition, metadata
+  preservation, empty list, non-dict entries skipped, missing
+  flag = missing, default-year-from-as-of, explicit override),
+  `build_manifest` (counts, both lists with metadata, empty
+  markers), `_validate_response` (frontmatter, both required
+  headings), `run` (short-circuit, UTF-8 encoding, atomic write,
+  preserves existing on bad response, propagates subprocess
+  failure), and env-var parsing. Suite total: 230 passing.
+
 - **Phase 5 Slice 2 — expectation-gaps heuristic added to
   `compiled/anomalies.md`.** New `compute_expectation_gaps(conn, *,
   as_of=None)` function flags `(entity, field)` pairs in a new

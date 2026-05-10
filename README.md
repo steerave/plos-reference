@@ -501,7 +501,59 @@ When both lists are empty (no deviations, no gaps), `run` short-circuits and wri
 - **Per-entity expected-cadence frontmatter.** Slice 2 infers cadence from history. Slice 2+ may add an explicit override (e.g., `expected_statements:` list, or `not_expected: [field, ...]` opt-out).
 - **Biweekly cadences.** Paystubs (Beacon) don't participate in gap detection; they'd require a non-monthly heuristic. Future slice if it matters.
 - **Multi-month gap accumulation.** Slice 2 flags only the currently-due month per `(entity, field)`. Older missed months that were flagged in earlier passes and never resolved are not re-flagged. The audit-pass story (later Phase 5) is the right place for that history.
-- **Unexpected-charges section.** Slice 3.
+- **Unexpected-charges section** for `anomalies.md`. Requires transaction-level ingestion + a subscription registry. Future slice.
+
+## Quickstart — Phase 5 Slice 3 (tax-prep compile pass)
+
+The **third and final v1 compiled artifact** lands here. `python -m plos.compile_tax_prep` reads a per-year inventory file at `source/tax/<year>/expected-documents.md`, partitions its entries into received vs. missing by the `received: bool` flag, and shells out to the `claude` CLI to render a human-readable `compiled/tax-prep.md`. Same statistics-in-Python / prose-in-Claude split as `anomalies.md`.
+
+### Prerequisites
+
+- The sample vault now ships `examples/sample-vault/source/tax/2026/expected-documents.md` with five demo entries (W-2, 1098, 1099-INT, property tax, charitable receipts). Two are marked `received: true`; three are missing.
+- Two stub `received/` files at `examples/sample-vault/source/tax/2026/received/` so the artifact's provenance arrows point to real files.
+
+### Tax-year resolution
+
+The compile pass auto-detects the active tax year from today's UTC date:
+
+- **Jan–Apr** → previous calendar year (the filing window).
+- **May–Dec** → current calendar year (the collection window).
+
+Override with the `PLOS_TAX_YEAR` env var (`YYYY`). Malformed values raise.
+
+### Action — run the compile pass
+
+```powershell
+# Today is 2026-05-10 → active tax year auto-resolves to 2026.
+python -m plos.compile_tax_prep
+
+# Or pin to a specific year:
+$env:PLOS_TAX_YEAR = "2026"
+python -m plos.compile_tax_prep
+Remove-Item Env:PLOS_TAX_YEAR
+```
+
+The log line reports `(tax_year=YYYY, received=N, missing=M, manifest length: K chars)`.
+
+### What success looks like
+
+1. **`examples/sample-vault/compiled/tax-prep.md` exists** with frontmatter declaring `artifact: tax-prep`, `tax_year: 2026`, `refresh_cadence: monthly (weekly Jan-Apr)`, `sources_read:` listing every cited path.
+2. **`Status:`** line: `2 of 5 expected documents received.`
+3. **`## Received` section** — two bullets (1098 from Mr. Cooper, property tax statement), each with a `→ /source/tax/2026/received/...` arrow.
+4. **`## Missing` section** — three bullets (W-2, 1099-INT, charitable receipts), each citing the inventory file as provenance.
+5. **No `.tmp` leak** in `examples/sample-vault/compiled/`.
+
+### Empty-state behaviour
+
+If `source/tax/<year>/expected-documents.md` doesn't exist for the resolved tax year, `run` short-circuits and writes a deterministic "no inventory configured for <year>" artifact without invoking Claude. Both section headings are still emitted with placeholder bullets, so downstream readers (audit pass, notifications) see a stable contract.
+
+### What this does *not* do (deferred)
+
+- **`## For the accountant`** section — running totals (charitable contributions, rental income, estimated tax payments) aggregated from `extracted_fields`. Adds cross-table joins; defer until real tax-prep workflow drives the requirement.
+- **`## Outstanding actions`** section — a chase-list derived from the missing list. The missing list already implies the chase; an explicit Outstanding section would be Claude synthesis on top of Claude synthesis.
+- **File-presence-based received detection.** v1 trusts the inventory's `received: bool` flag. A future slice could cross-check by globbing `received/` and warning when a `received: true` entry's `received_path` doesn't exist.
+- **Per-document linking back to Paperless.** Each `received_path` currently points to a vault file, not a Paperless URL. A future slice may add `paperless_url:` per entry.
+- **Audit pass** verifying `sources_read:` matches body `→ /source/...` arrows. Now ready to land — all three v1 compiled artifacts ship. Next slice.
 
 ## License
 

@@ -824,3 +824,115 @@ seeding two pairs in the same test.
 - **Audit pass.** Still deferred to after `tax-prep.md`.
 - **Compile-pass scheduling, notifications, indexer.** Separate
   Phase 5 slices.
+
+## Phase 5 Slice 3 conventions (decided during the tax-prep build)
+
+Phase 5 Slice 3 lands `compiled/tax-prep.md`, the third and final
+compiled artifact in the v1 set. With this slice the three-artifact
+trilogy — `this-week.md`, `anomalies.md`, `tax-prep.md` — is
+complete, and the audit-pass story (compare `sources_read:` against
+body `→ /source/...` arrows) is finally ready to land.
+
+The compile pass mirrors the `compile_anomalies.py` shape: top-
+level constants, a pure-Python `compute_*` function, a
+`build_manifest` that pre-aggregates structured input for Claude,
+a Claude-rendered body with a validation gate, atomic write,
+and an empty-state short-circuit.
+
+### Per-year inventory file is the source of truth
+
+`source/tax/<year>/expected-documents.md` carries a YAML
+frontmatter `expected:` list. Each entry is a dict with:
+
+- `name: str` — human-readable label (required)
+- `source: str` — optional context (employer / bank / county / etc.)
+- `received: bool` — partitioning signal (default false)
+- `received_date: date | str` — optional, YAML-date or ISO string;
+  normalised to ISO string by `compute_tax_prep`
+- `received_path: str` — optional, vault-relative path; used as
+  the provenance arrow target on the received bullet
+- `notes: str` — optional, surfaced to Claude for prose framing
+
+Entries with `received: true` partition into the `received` list;
+everything else lands in `missing`. Non-dict entries in the list
+are silently skipped — invalid inventory rows don't crash the
+compile pass.
+
+This file is the single edit surface. No SQLite mirror, no
+secondary registry. The user flips `received: true` and fills in
+`received_date` + `received_path` when each document arrives;
+the next compile pass surfaces the new state.
+
+### Tax-year resolution
+
+`_default_tax_year(as_of)` follows the US individual filing
+calendar:
+
+- `as_of.month <= 4` → previous calendar year (Jan-Apr is the
+  filing window for the prior year)
+- `as_of.month >= 5` → current calendar year (collection window)
+
+Override with `PLOS_TAX_YEAR=YYYY`. Malformed values raise on
+`int()` cast — a typo'd override should fail loud rather than
+silently default to today's year.
+
+### Two required sections only
+
+Slice 1 of tax-prep ships `## Received` + `## Missing`. The
+template at `docs/artifact-templates.md` also documents
+`## For the accountant` (running totals across the vault) and
+`## Outstanding actions` (chase list). Both are deferred:
+
+- **For the accountant** requires cross-table joins on
+  `extracted_fields` (charitable totals, rental income/expenses,
+  estimated-tax payments). Worth landing when real tax-prep
+  workflow drives the requirement.
+- **Outstanding actions** is Claude synthesis on top of Claude
+  synthesis — the missing list already implies the chase. Adding
+  it would be writing the same information twice.
+
+REQUIRED_SECTIONS is `("## Received", "## Missing")`. Later
+slices add headings without breaking the existing validation
+gate.
+
+### Stub files for received_path provenance
+
+The sample vault includes two stub files under
+`source/tax/2026/received/` (`1098_mr_cooper.md`,
+`property_tax_2026.md`) so the demo artifact's `→ /source/...`
+arrows resolve to real files. They carry a
+`type: tax-received-stub` frontmatter and a brief note that
+they're placeholders. The operating instance would store actual
+PDFs (or `.url` pointers back to Paperless) at these paths.
+
+### Inventory-missing short-circuit
+
+When `source/tax/<year>/expected-documents.md` doesn't exist
+for the resolved tax year, `run` writes a deterministic
+"no inventory configured for <year>" artifact without invoking
+Claude. The shape mirrors what Claude would render given an
+empty inventory: full frontmatter, both section headings,
+placeholder bullets in each.
+
+This is the right behaviour for new tax years before the user
+seeds the inventory file — instead of failing, the artifact
+self-documents what's missing.
+
+### Out of scope at end of Phase 5 Slice 3
+
+- **`## For the accountant` section.** Aggregated running totals
+  from `extracted_fields`. Defer until real tax-prep workflow
+  drives the requirement.
+- **`## Outstanding actions` section.** Redundant with the
+  Missing list. Defer.
+- **File-presence-based received detection.** v1 trusts the
+  inventory's `received: bool`. A cross-check pass could glob
+  `received/` and warn when a `received: true` entry's
+  `received_path` doesn't resolve.
+- **Per-document Paperless linkage.** No `paperless_url:` field
+  per entry yet. A future slice can add it once real-tax-doc
+  ingestion is in play.
+- **Multi-year aggregation** (year-over-year deltas, prior-year
+  references). Phase 6+.
+- **Audit pass.** Now unblocked — all three v1 artifacts ship.
+  Next slice.
