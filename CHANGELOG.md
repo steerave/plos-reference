@@ -105,6 +105,15 @@ is the baseline and is not enumerated below.
 
 ### Fixed
 
+- **Phase 4-1 hotfix:** `compile_this_week.run()` now passes
+  `encoding="utf-8"` to `subprocess.run`. Without it, Windows defaults
+  the stdin pipe to `cp1252`, which can't encode the `→` source-
+  provenance arrow embedded in the prompt preamble (and likely in
+  Claude's response too). Surfaced the first time the live demo
+  ran on Windows: `UnicodeEncodeError: 'charmap' codec can't encode
+  character '\\u2192'`. The wiring tests on Linux/macOS would not
+  have caught it because their default codec is already UTF-8.
+
 - **Phase 3-0:** worker now refreshes `documents.document_date` from the
   Paperless API at the start of each processing pass. Paperless's date
   detection runs asynchronously after consume, so the post-consume hook

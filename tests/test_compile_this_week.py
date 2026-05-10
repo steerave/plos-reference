@@ -147,6 +147,9 @@ def test_run_invokes_claude_with_prompt_on_stdin(vault, monkeypatch):
     assert "this-week.md" in captured["input"]
     assert captured["kwargs"]["text"] is True
     assert captured["kwargs"]["check"] is True
+    # UTF-8 encoding is required on Windows: both the prompt and
+    # Claude's response carry → arrows that cp1252 can't handle.
+    assert captured["kwargs"]["encoding"] == "utf-8"
 
 
 def test_run_writes_claude_output_atomically(vault, monkeypatch):

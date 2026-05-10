@@ -228,12 +228,16 @@ def run(vault_root: Path, claude_cmd: str = "claude") -> Path:
     logger.info(
         "invoking %s --print (manifest length: %d chars)", claude_cmd, len(manifest)
     )
+    # encoding="utf-8" is non-negotiable on Windows — both the prompt
+    # (with → source-provenance arrows) and Claude's response contain
+    # non-ASCII characters that the default cp1252 codec can't handle.
     completed = subprocess.run(
         [claude_cmd, "--print"],
         input=prompt,
         capture_output=True,
         text=True,
         check=True,
+        encoding="utf-8",
     )
     response = completed.stdout
 
