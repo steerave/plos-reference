@@ -169,6 +169,80 @@ Within ~30 seconds, all three should be true:
 
 That's the Phase 1 demo. Phase 2 adds the first extractor and writes to the vault.
 
+## Quickstart — Phase 2 demo
+
+End-to-end loop: drop a fictional electric bill into Paperless, watch the worker pull the OCR text, recognize the bill, look up the matching property, atomically write the extracted fields into the property's `index.md` frontmatter, then open a Dataview dashboard in Obsidian and see the new value rendered live.
+
+This builds on Phase 1 — Paperless, Redis, and the SQLite sidecar from the Phase 1 demo are still required.
+
+### Prerequisites (in addition to Phase 1)
+
+- A Paperless API token. Generate one in the Paperless UI: top-right avatar → **My Profile** → next to *API Auth Token*, click *Show* (or *Regenerate* if needed). Copy the value.
+- Obsidian, with the [Dataview plugin](https://blacksmithgu.github.io/obsidian-dataview/) installed and enabled, opened on `examples/sample-vault/` as the vault. The dashboard renders as a live table inside Obsidian; without Dataview it shows as a code block.
+
+### One-time setup
+
+#### Step 1 — Add the new env vars to `.env`
+
+Open `.env` in any text editor and set:
+
+- `PAPERLESS_API_TOKEN` — paste the token from the Prerequisites step.
+- `PLOS_VAULT_ROOT` — leave as `examples/sample-vault` for the demo, or point at your own vault.
+
+**Why:** The worker uses the API token to fetch each document's OCR'd text. `PLOS_VAULT_ROOT` tells the worker which vault to write into.
+
+#### Step 2 — Pull the new dependencies
+
+**Where:** repo root, with `(.venv)` active.
+
+```powershell
+pip install -e ".[dev]"
+```
+
+**Why:** Phase 2 added `python-dotenv` (already wired in Phase 1) plus dev-only `reportlab` (for the sample-bill builder) and `responses` (HTTP mocking in tests).
+
+#### Step 3 — Restart the worker
+
+If you have a Phase 1 worker running, stop it (`Ctrl+C` in its terminal) and start the Phase 2 one:
+
+```powershell
+.venv\Scripts\activate
+python -m plos.worker
+```
+
+You should see a startup line like `worker started — polling every 60s, vault_root=...`. The vault_root tells you exactly which folder the worker will write into.
+
+### Run the demo
+
+#### Action 1 — drop the sample electric bill
+
+Drag `tests\fixtures\sample_bills\electric_acme_2026_04.pdf` into `G:\plos-data\paperless\consume\`. (Or run `python tests\fixtures\sample_bills\build.py` first to regenerate it from scratch.) The bill is for Acme Power & Light, account `ACCT-12345`, $142.37 due 2026-04-30, 850 kWh — the same account number the sample property at `examples/sample-vault/source/properties/123-main-davenport/index.md` already declares.
+
+#### Action 2 — watch the worker pick it up
+
+Within ~30 seconds the worker prints:
+
+```
+extracted id=N paperless_id=M extractor=graduated:utility_bill_electric property=123-main-davenport changed=['data_effective_date', 'electric_account', 'last_utility_bill_amount', 'last_utility_bill_date', 'last_utility_bill_kwh', 'last_utility_bill_url'] status=done
+```
+
+(Field names will be in alphabetical order.)
+
+### What success looks like
+
+Three places to check:
+
+1. **In the property's `index.md`** — open `examples/sample-vault/source/properties/123-main-davenport/index.md`. The frontmatter now has:
+   - `last_utility_bill_amount: 142.37`
+   - `last_utility_bill_date: 2026-04-30`
+   - `last_utility_bill_kwh: 850`
+   - `last_utility_bill_url: http://localhost:8888/documents/<M>/`
+   - `data_effective_date: 2026-04-30`
+2. **In Obsidian, on `examples/sample-vault/dashboards/properties.md`** — the Dataview table renders one row for the property, with the bill amount, kWh, and a clickable Source link back to Paperless.
+3. **In SQLite** — `extracted_fields` has five rows for the bill (one per extracted field), each with `handler='graduated:utility_bill_electric'`. The `entities` table has a row for `123-main-davenport`.
+
+That's the Phase 2 demo. Phase 3 will add gas, water, and internet extractors plus mortgage statements and pay stubs, and Phase 4 introduces the first compiled artifact (`this-week.md`).
+
 ## License
 
 See [LICENSE](./LICENSE).

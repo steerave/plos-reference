@@ -11,6 +11,25 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 2 substrate end-to-end:** graduated-extractor framework
+  (`src/plos/extractors/registry.py` with the `extract(text, document)
+  -> dict | None` contract), the first extractor for Acme Power & Light
+  electric bills, an entity matcher that routes a bill to its property
+  via `electric_account`, an atomic YAML-frontmatter merge writer, the
+  first Dataview dashboard at `examples/sample-vault/dashboards/properties.md`,
+  and a populated sample property (`123-main-davenport`) plus a
+  reportlab-built sample bill PDF fixture (`tests/fixtures/sample_bills/`).
+- Paperless REST client (`src/plos/paperless.py`) for fetching OCR'd
+  document text — `get_document_text(paperless_id)` and `get_document(id)`.
+- `DocumentMeta` dataclass — the lightweight bundle the worker passes to
+  every extractor (paperless_id, paperless_url, document_date, correspondent).
+- New env vars in `.env.template`: `PAPERLESS_API_TOKEN` (generate via
+  Paperless UI → My Profile → API Auth Token) and `PLOS_VAULT_ROOT`
+  (defaults to `examples/sample-vault`).
+- `reportlab` and `responses` dev dependencies.
+- `.gitattributes` binary marks for `*.pdf`, `*.png`, `*.jpg`, `*.jpeg`,
+  `*.gif`, `*.zip` so autocrlf on Windows can't corrupt the test
+  fixtures on a fresh clone.
 - Phase 1 substrate: Paperless-ngx (Docker, SQLite backend) plus a
   `redis:7-alpine` sidecar, the four-table SQLite sidecar schema, the
   post-consume hook that records ingested documents, and a worker skeleton
@@ -29,6 +48,19 @@ is the baseline and is not enumerated below.
 
 ### Changed
 
+- `worker.run_one_pass(conn, vault_root)` now drains documents through
+  the full Phase 2 pipeline — fetch OCR text, dispatch to extractors,
+  match the entity, atomically merge into vault frontmatter, record one
+  `extracted_fields` row per field, mark `documents.status`. Previously
+  it only logged each new row.
+- Document status taxonomy expanded:
+  - `done` — extractor + entity match, vault written.
+  - `pending_claude` — no graduated extractor recognized the document.
+  - `needs_review` — extractor matched but no entity could be routed
+    (sets `review_reason` to `no_account_in_extraction` or
+    `unmatched_entity`).
+  - `new` — left untouched on transient processing failure so the next
+    poll cycle retries.
 - Phase 1 substrate now includes a Redis sidecar. The original "no Redis"
   intent did not survive contact with current Paperless-ngx, which hard-
   requires Redis for the Django cache and Celery broker. `ARCHITECTURE.md`

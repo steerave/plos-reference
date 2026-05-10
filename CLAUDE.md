@@ -77,3 +77,76 @@ Anthropic's Claude Code subscription is the only AI dependency. It does triple d
 - What's the smallest end-to-end slice that demonstrates this phase's value?
 - What's deferred from this phase, and is the deferral noted somewhere?
 - What's the demo at the end of this phase?
+
+## Phase 2 conventions (decided during the electric-bill build)
+
+The following decisions were made during Phase 2 implementation. Future
+phases that extend this surface should follow them unless there's a
+specific reason to deviate.
+
+### Graduated-extractor interface
+
+Every extractor under `src/plos/extractors/graduated/` is a module with
+a top-level `extract` function:
+
+```python
+def extract(text: str, document: DocumentMeta) -> dict[str, Any] | None
+```
+
+- Returns `None` when the extractor doesn't recognize the document.
+- Returns `None` when the provider header matches but the body is too
+  malformed to yield the minimum viable field set — better to bail than
+  to write a half-extracted record.
+- `DocumentMeta` (defined in `extractors/registry.py`) carries
+  `paperless_id`, `paperless_url`, `document_date`, and `correspondent`.
+  Frozen dataclass — extractors can't mutate it back.
+- The registry is a plain module-level list (`EXTRACTORS`) at the bottom
+  of `registry.py`. Adding a new extractor is one import + one tuple
+  entry. No auto-discovery, no plugin metaclass, no import-time side
+  effects in the extractor modules themselves. This keeps test
+  isolation free.
+
+### Vault writer merge rules (apply in order, per field)
+
+`vault.merge_frontmatter(path, updates, source_doc_date)` applies these
+rules per field, in this order:
+
+1. Skip if the field name appears in the target's `locked_fields:` list.
+2. Skip every field if the existing `data_effective_date >= source_doc_date`
+   (freshness rule — newer existing state wins, including same-day equal).
+3. Otherwise apply, then bump `data_effective_date` to `source_doc_date`.
+
+Returns the dict of fields that actually changed; empty dict means no
+file write happened. Atomic write via temp + fsync + `os.replace()` is
+non-negotiable here — a partial write to `index.md` corrupts YAML and
+breaks every Dataview dashboard.
+
+### Worker document-status taxonomy
+
+The worker writes one of these to `documents.status` per row:
+
+- `done` — graduated extractor matched, entity routed, vault written.
+- `pending_claude` — no graduated extractor recognized the document; it
+  sits for a future Claude Code session.
+- `needs_review` — extractor matched but no entity was routable.
+  `review_reason` is set to `no_account_in_extraction` (the bill
+  matched but no account number could be parsed) or `unmatched_entity`
+  (account parsed but no property in the vault claims it).
+- `new` (unchanged) — left alone on a transient processing failure
+  (Paperless 5xx, network error). Next poll cycle retries.
+
+### Audit trail
+
+The worker inserts one row into `extracted_fields` per field per
+extraction, even when the vault freshness rule means no actual update
+landed. This preserves the full extraction history for trend queries
+and debugging — the vault holds the resolved current value, SQLite
+holds every claim ever made.
+
+### Sample data convention
+
+Phase 2's sample property is `123-main-davenport`. Phase 2's sample
+bill correspondent is `Acme Power & Light` (account `ACCT-12345`,
+$142.37, 850 kWh). Both are fictional and live in the public reference
+repo. Real-household entities and bills go in the separate private
+operating-instance repo and never land here.
