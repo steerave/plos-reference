@@ -283,6 +283,29 @@ Drag `tests\fixtures\sample_bills\bank_first_davenport_2026_04.pdf` into `G:\plo
 2. **In Obsidian, on `examples/sample-vault/dashboards/account-balances.md`** — a Dataview table renders the row for the checking account with the latest balance and a Source link back to Paperless.
 3. **In SQLite** — `extracted_fields` gains six new rows for the statement, each with `handler='graduated:bank_statement_first_davenport'`. The `entities` table gains a row for `first-davenport-checking-4521` with `type='account'`, `domain='finance'`.
 
+## Quickstart — Phase 3 Slice 3 (pay stub)
+
+This slice introduces the first **person** entity — `examples/sample-vault/source/people/joe/index.md` — and the third new dashboard. Same Paperless + worker substrate; no env-var changes.
+
+#### Action — drop the sample pay stub
+
+Drag `tests\fixtures\sample_bills\paystub_beacon_2026_04.pdf` into `G:\plos-data\paperless\consume\`. The stub is for *Joe Sample* employed at *Beacon Software*, period ending 2026-04-14, gross $4,615.38, net $3,145.28, YTD gross $36,923.04. The same `legal_name` + `employer_current` pair appears on the new sample person record.
+
+### What success looks like
+
+1. **In Joe's `index.md`** — `examples/sample-vault/source/people/joe/index.md` frontmatter gains:
+   - `last_paystub_gross: 4615.38`
+   - `last_paystub_net: 3145.28`
+   - `last_paystub_ytd_gross: 36923.04`
+   - `last_paystub_period_end: 2026-04-14`
+   - `last_paystub_url: http://localhost:8888/documents/<M>/`
+2. **In Obsidian, on `examples/sample-vault/dashboards/income.md`** — a Dataview table renders one row showing the latest pay stub plus YTD gross.
+3. **In SQLite** — `extracted_fields` gains seven new rows (gross, net, period end, url, employee name, employer, YTD gross) with `handler='graduated:paystub_beacon_software'`. The `entities` table gains a row for `joe` with `type='person'`, `domain='family'`.
+
+### End of Phase 3
+
+Drop all three Phase 3 PDFs (mortgage, bank, paystub) plus the Phase 2 electric bill in `consume/` and watch four extractors route four documents onto three different entity types — property, account, person — through one generic worker. The architecture's "one extractor file + one entry" claim now has three more receipts. Phase 4 introduces the first compiled artifact (`this-week.md`) and the Claude Code session workflow that drives it.
+
 ## License
 
 See [LICENSE](./LICENSE).

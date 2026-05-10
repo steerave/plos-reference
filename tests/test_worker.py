@@ -74,6 +74,20 @@ def vault(tmp_path):
         "# First Davenport Bank — Checking •••4521\n",
         encoding="utf-8",
     )
+    person = tmp_path / "vault" / "source" / "people" / "joe"
+    person.mkdir(parents=True)
+    (person / "index.md").write_text(
+        "---\n"
+        "type: source\n"
+        "entity: person\n"
+        "slug: joe\n"
+        "legal_name: Joe Sample\n"
+        "employer_current: Beacon Software\n"
+        "locked_fields: []\n"
+        "---\n\n"
+        "# Joe Sample\n",
+        encoding="utf-8",
+    )
     return tmp_path / "vault"
 
 
@@ -136,6 +150,17 @@ SAMPLE_BANK_STATEMENT = (
     "Total deposits: $5,420.00\n"
     "Total withdrawals: $3,128.66\n"
     "Ending balance: $16,529.74\n"
+)
+
+
+SAMPLE_PAYSTUB = (
+    "Beacon Software\n"
+    "Earnings statement\n"
+    "Employee: Joe Sample\n"
+    "Period ending: 2026-04-14\n"
+    "Gross pay: $4,615.38\n"
+    "Net pay: $3,145.28\n"
+    "YTD gross: $36,923.04\n"
 )
 
 
@@ -424,6 +449,92 @@ def test_bank_statement_routes_to_account_via_account_number(conn, vault, caplog
     ).fetchone()
     assert ent["type"] == "account"
     assert ent["domain"] == "finance"
+
+
+@responses.activate
+def test_paystub_routes_to_person_via_employer_and_name(conn, vault, caplog):
+    """Beacon Software pay stub extractor + entity matcher land paystub
+    fields on the person entity, the third entity type Phase 3 introduces."""
+    _insert(conn, 17, document_date="2026-04-17", correspondent="Beacon Software")
+    _mock_document(17, SAMPLE_PAYSTUB)
+
+    with caplog.at_level(logging.INFO, logger="plos.worker"):
+        worker.run_one_pass(conn, vault)
+
+    doc = conn.execute(
+        "SELECT status, document_type FROM documents WHERE paperless_id=17"
+    ).fetchone()
+    assert doc["status"] == "done"
+    assert doc["document_type"] == "paystub_beacon_software"
+
+    person_path = vault / "source" / "people" / "joe" / "index.md"
+    text = person_path.read_text(encoding="utf-8")
+    assert "last_paystub_gross: 4615.38" in text
+    assert "last_paystub_net: 3145.28" in text
+    assert "last_paystub_ytd_gross: 36923.04" in text
+    assert "last_paystub_period_end: '2026-04-14'" in text
+
+    rows = conn.execute(
+        "SELECT field_name, handler FROM extracted_fields WHERE document_id = ?",
+        (
+            conn.execute("SELECT id FROM documents WHERE paperless_id=17").fetchone()[
+                "id"
+            ],
+        ),
+    ).fetchall()
+    field_names = {r["field_name"] for r in rows}
+    assert {
+        "last_paystub_gross",
+        "last_paystub_net",
+        "last_paystub_period_end",
+        "last_paystub_url",
+        "paystub_employee_name",
+        "paystub_employer",
+        "last_paystub_ytd_gross",
+    } <= field_names
+    for r in rows:
+        assert r["handler"] == "graduated:paystub_beacon_software"
+
+    ent = conn.execute(
+        "SELECT type, domain, slug FROM entities WHERE slug='joe'"
+    ).fetchone()
+    assert ent["type"] == "person"
+    assert ent["domain"] == "family"
+
+
+@responses.activate
+def test_three_documents_route_to_three_entity_types(conn, vault, caplog):
+    """End-to-end Phase 3 demo: drop a mortgage statement, a bank statement,
+    and a pay stub. Each lands on a different entity type via a different
+    extractor; the same generic worker handles all three."""
+    _insert(conn, 30, document_date="2026-04-15", correspondent="Mr. Cooper")
+    _insert(conn, 31, document_date="2026-04-15", correspondent="First Davenport Bank")
+    _insert(conn, 32, document_date="2026-04-17", correspondent="Beacon Software")
+    _mock_document(30, SAMPLE_MORTGAGE_STATEMENT)
+    _mock_document(31, SAMPLE_BANK_STATEMENT)
+    _mock_document(32, SAMPLE_PAYSTUB)
+
+    handled = worker.run_one_pass(conn, vault)
+    assert handled == 3
+
+    statuses = dict(
+        conn.execute(
+            "SELECT paperless_id, status FROM documents WHERE paperless_id IN (30,31,32)"
+        ).fetchall()
+    )
+    assert statuses == {30: "done", 31: "done", 32: "done"}
+
+    types = dict(
+        conn.execute(
+            "SELECT slug, type FROM entities "
+            "WHERE slug IN ('123-main-davenport', 'first-davenport-checking-4521', 'joe')"
+        ).fetchall()
+    )
+    assert types == {
+        "123-main-davenport": "property",
+        "first-davenport-checking-4521": "account",
+        "joe": "person",
+    }
 
 
 def test_vault_root_required_in_main(monkeypatch):

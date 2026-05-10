@@ -187,3 +187,72 @@ def test_returns_none_for_unknown_account_number(tmp_path):
 
 def test_account_lookup_returns_none_when_no_accounts_dir(tmp_path):
     assert entities.find_account_by_account_number("ACCT-4521", tmp_path) is None
+
+
+# -----------------------------------------------------------------------------
+# find_person_by_employer_and_name
+# -----------------------------------------------------------------------------
+
+
+def _person(vault: Path, slug: str, frontmatter: dict) -> Path:
+    folder = vault / "source" / "people" / slug
+    folder.mkdir(parents=True, exist_ok=True)
+    fm_lines = "\n".join(f"{k}: {v}" for k, v in frontmatter.items())
+    (folder / "index.md").write_text(
+        f"---\n{fm_lines}\n---\n\n# {slug}\n",
+        encoding="utf-8",
+    )
+    return folder / "index.md"
+
+
+def test_finds_person_by_employer_and_name(tmp_path):
+    _person(
+        tmp_path,
+        "joe",
+        {
+            "entity": "person",
+            "legal_name": "Joe Sample",
+            "employer_current": "Beacon Software",
+        },
+    )
+    path = entities.find_person_by_employer_and_name(
+        "Joe Sample", "Beacon Software", tmp_path
+    )
+    assert path is not None
+    assert path.parent.name == "joe"
+
+
+def test_person_lookup_requires_both_name_and_employer(tmp_path):
+    """Name-only or employer-only matches don't count — both must agree."""
+    _person(
+        tmp_path,
+        "joe-beacon",
+        {
+            "entity": "person",
+            "legal_name": "Joe Sample",
+            "employer_current": "Beacon Software",
+        },
+    )
+    _person(
+        tmp_path,
+        "joe-other",
+        {
+            "entity": "person",
+            "legal_name": "Joe Sample",
+            "employer_current": "Other Inc",
+        },
+    )
+    path = entities.find_person_by_employer_and_name(
+        "Joe Sample", "Beacon Software", tmp_path
+    )
+    assert path is not None
+    assert path.parent.name == "joe-beacon"
+
+
+def test_person_lookup_returns_none_when_no_people_dir(tmp_path):
+    assert (
+        entities.find_person_by_employer_and_name(
+            "Joe Sample", "Beacon Software", tmp_path
+        )
+        is None
+    )

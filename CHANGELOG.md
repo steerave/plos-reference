@@ -11,6 +11,25 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 3 Slice 3 — Beacon Software pay stub extractor.** Fourth
+  graduated extractor (`src/plos/extractors/graduated/paystub_beacon_software.py`)
+  recognises a Beacon Software bi-weekly pay stub and routes it to the
+  matching person entity by a (legal_name, employer_current) pair —
+  the first composite routing key in the registry. Introduces the
+  first **person** entity in the sample vault
+  (`examples/sample-vault/source/people/joe/index.md`) and a new
+  dashboard at `examples/sample-vault/dashboards/income.md` showing
+  the latest pay stub + YTD gross per person. Sample fixture lands at
+  `tests/fixtures/sample_bills/paystub_beacon_2026_04.pdf`.
+- New entity matcher `entities.find_person_by_employer_and_name()`.
+- README quickstart gains a "Phase 3 Slice 3 (pay stub)" section plus
+  a closing "End of Phase 3" note that summarises the three-entity-type
+  end-state demo.
+- Pay-stub sensitivity classification (full/summary/metadata-only
+  sidecar modes) is **deliberately deferred to Phase 4+**, per the
+  architecture's deferred-features list. The Phase 3 extractor treats
+  pay stubs like any other document; body redaction lands later.
+
 - **Phase 3 Slice 2 — First Davenport Bank statement extractor.** Third
   graduated extractor (`src/plos/extractors/graduated/bank_statement_first_davenport.py`)
   recognises a First Davenport Bank monthly checking statement and routes

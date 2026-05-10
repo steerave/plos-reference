@@ -82,3 +82,23 @@ def find_account_by_account_number(
         "accounts",
         lambda fm: fm.get("account_number") == account_number,
     )
+
+
+def find_person_by_employer_and_name(
+    legal_name: str, employer: str, vault_root: Path
+) -> Path | None:
+    """Return the person whose legal_name and employer_current both match.
+
+    Both fields must match for a routing decision — `legal_name` alone
+    isn't enough (a household could have multiple people with the same
+    surname), and `employer_current` alone isn't enough (multiple people
+    could share an employer).
+    """
+    return _find_in(
+        vault_root,
+        "people",
+        lambda fm: (
+            fm.get("legal_name") == legal_name
+            and fm.get("employer_current") == employer
+        ),
+    )

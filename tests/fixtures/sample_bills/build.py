@@ -14,6 +14,7 @@ Generated outputs:
     electric_acme_2026_04.pdf         — Phase 2: Acme Power & Light bill
     mortgage_mrcooper_2026_04.pdf     — Phase 3 Slice 1: Mr. Cooper statement
     bank_first_davenport_2026_04.pdf  — Phase 3 Slice 2: First Davenport Bank
+    paystub_beacon_2026_04.pdf        — Phase 3 Slice 3: Beacon Software stub
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ FIXTURES = Path(__file__).resolve().parent
 ELECTRIC_OUTPUT = FIXTURES / "electric_acme_2026_04.pdf"
 MORTGAGE_OUTPUT = FIXTURES / "mortgage_mrcooper_2026_04.pdf"
 BANK_OUTPUT = FIXTURES / "bank_first_davenport_2026_04.pdf"
+PAYSTUB_OUTPUT = FIXTURES / "paystub_beacon_2026_04.pdf"
 
 
 def _new_canvas(path: Path, title: str, author: str, subject: str) -> canvas.Canvas:
@@ -256,6 +258,88 @@ def build_bank_statement(path: Path) -> None:
     c.save()
 
 
+def build_paystub(path: Path) -> None:
+    c = _new_canvas(
+        path,
+        title="Beacon Software — Pay Stub",
+        author="Beacon Software",
+        subject="Bi-weekly pay stub",
+    )
+
+    width, _ = LETTER
+    left = 1 * inch
+    right = width - 1 * inch
+    y = 10 * inch
+
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(left, y, "Beacon Software")
+    y -= 0.3 * inch
+    c.setFont("Helvetica-Oblique", 11)
+    c.drawString(left, y, "Earnings statement")
+    y -= 0.5 * inch
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left, y, "Employee")
+    y -= 0.22 * inch
+    c.setFont("Helvetica", 11)
+    c.drawString(left, y, "Employee:        Joe Sample")
+    y -= 0.2 * inch
+    c.drawString(left, y, "Employee ID:     E-001")
+    y -= 0.45 * inch
+
+    rows = [
+        ("Pay period:", "April 1, 2026 - April 14, 2026"),
+        ("Period ending:", "2026-04-14"),
+        ("Pay date:", "2026-04-17"),
+    ]
+    c.setFont("Helvetica", 11)
+    for label, value in rows:
+        c.drawString(left, y, label)
+        c.drawString(left + 2 * inch, y, value)
+        y -= 0.28 * inch
+
+    y -= 0.4 * inch
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left, y, "Earnings")
+    y -= 0.28 * inch
+    c.setFont("Helvetica", 11)
+    earnings = [
+        ("Gross pay:", "$4,615.38"),
+        ("Federal income tax:", "$612.40"),
+        ("State income tax:", "$184.62"),
+        ("FICA + Medicare:", "$353.08"),
+        ("Pre-tax deductions:", "$320.00"),
+    ]
+    for label, value in earnings:
+        c.drawString(left + 0.25 * inch, y, label)
+        c.drawRightString(right, y, value)
+        y -= 0.24 * inch
+
+    y -= 0.1 * inch
+    c.line(left + 0.25 * inch, y, right, y)
+    y -= 0.28 * inch
+    c.setFont("Helvetica-Bold", 13)
+    c.drawString(left + 0.25 * inch, y, "Net pay:")
+    c.drawRightString(right, y, "$3,145.28")
+
+    y -= 0.5 * inch
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(left, y, "Year-to-date")
+    y -= 0.28 * inch
+    c.setFont("Helvetica", 11)
+    ytd = [
+        ("YTD gross:", "$36,923.04"),
+        ("YTD net:", "$25,162.24"),
+    ]
+    for label, value in ytd:
+        c.drawString(left + 0.25 * inch, y, label)
+        c.drawRightString(right, y, value)
+        y -= 0.24 * inch
+
+    c.showPage()
+    c.save()
+
+
 def build_all() -> None:
     build_electric_bill(ELECTRIC_OUTPUT)
     print(f"wrote {ELECTRIC_OUTPUT}")
@@ -263,6 +347,8 @@ def build_all() -> None:
     print(f"wrote {MORTGAGE_OUTPUT}")
     build_bank_statement(BANK_OUTPUT)
     print(f"wrote {BANK_OUTPUT}")
+    build_paystub(PAYSTUB_OUTPUT)
+    print(f"wrote {PAYSTUB_OUTPUT}")
 
 
 if __name__ == "__main__":

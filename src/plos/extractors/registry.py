@@ -69,6 +69,7 @@ class RouteResult(NamedTuple):
 from plos.extractors.graduated import (  # noqa: E402
     bank_statement_first_davenport,
     mortgage_statement_mr_cooper,
+    paystub_beacon_software,
     utility_bill_electric,
 )
 
@@ -79,6 +80,7 @@ EXTRACTORS: list[tuple[str, ModuleType]] = [
     ("graduated:utility_bill_electric", utility_bill_electric),
     ("graduated:mortgage_statement_mr_cooper", mortgage_statement_mr_cooper),
     ("graduated:bank_statement_first_davenport", bank_statement_first_davenport),
+    ("graduated:paystub_beacon_software", paystub_beacon_software),
 ]
 
 
