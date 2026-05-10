@@ -42,11 +42,14 @@ class DocumentMeta:
 ExtractorFn = Callable[[str, DocumentMeta], Optional[dict[str, Any]]]
 
 
-# Active graduated extractors, in dispatch order. Empty by default; the
-# extractor modules themselves don't self-register, so test isolation is
-# free — tests that need a specific registry state can patch this list
-# via monkeypatch.setattr.
-EXTRACTORS: list[tuple[str, ExtractorFn]] = []
+from plos.extractors.graduated import utility_bill_electric  # noqa: E402
+
+# Active graduated extractors, in dispatch order. Adding a new extractor
+# is one import + one tuple entry. Tests that need a specific registry
+# state patch this list via monkeypatch.setattr.
+EXTRACTORS: list[tuple[str, ExtractorFn]] = [
+    ("graduated:utility_bill_electric", utility_bill_electric.extract),
+]
 
 
 def dispatch(text: str, document: DocumentMeta) -> tuple[str, dict[str, Any]] | None:
