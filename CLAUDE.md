@@ -1176,3 +1176,129 @@ with zero new env vars set).
   `EmailMessage` header would need extra parsing; defer.
 - **Bounce / delivery tracking.** Send-and-forget. SMTP errors
   raise, but post-delivery state isn't tracked.
+
+## Phase 5 Slice 6 conventions (decided during the indexer build)
+
+Phase 5 Slice 6 lands `plos.indexer` — the review-queue
+self-cleaner and queue-page renderer. With this slice the loop
+opened by Phase 4b's drain finally closes: drain leaves an
+unmatched-entity row, user reads the proposal in
+`_review/queue.md`, user creates the entity, indexer notices
+and marks the row resolved.
+
+### Two responsibilities, one module
+
+`indexer.py` does both detection and rendering because they
+share a fetch. Splitting them across two modules would mean two
+SQL queries against `documents.status='needs_review'` per pass,
+two atomic-write boundaries, and two CLI entries — overkill for
+the v1 cadence (the architecture targets a 10-minute poll, not
+sub-second). One module, one CLI, two responsibilities is the
+right level of decomposition here.
+
+### New `resolved` status
+
+The `documents.status` taxonomy gains one value:
+
+- `resolved` — was `needs_review`; user has since created the
+  proposed entity at `source/<type>/<slug>/index.md`. The
+  original extracted `fields` are NOT auto-applied; the user
+  applies them manually (or via a future slice's "apply
+  proposal" command). The `review_reason` JSON is kept on the
+  row as audit trail.
+
+Why `resolved` and not `done`? `done` means "extractor matched,
+entity routed, vault written" — that didn't happen here. The
+indexer didn't write fields to the entity; it just acknowledged
+that the gap (no entity to route to) is now closed. A
+distinct status keeps the audit trail honest: a `done` row
+implies its extracted fields were applied; a `resolved` row
+does not.
+
+### Exact-match slug resolution only
+
+`entities.find_by_slug(slug, vault_root)` is the resolution
+test. Glob `source/*/<slug>/index.md` and return the first
+match. Exact slug match, no fuzzy / normalised variants. If
+Claude proposed `123-main` but the user created
+`123-main-street`, the indexer doesn't notice — the user can
+edit the JSON in `review_reason` to align, or just leave it
+queued (low cost; the entity exists and works for downstream
+flows regardless).
+
+This is conservative-on-purpose. Auto-resolving a mismatched
+slug would mean the indexer is making a guess about user
+intent; we'd rather the row sit visibly in the queue than
+silently disappear under a wrong assumption.
+
+### Plain-string `claude_unmatched_entity` rows stay queued
+
+There are two shapes for `review_reason` carrying the
+`claude_unmatched_entity` discriminator:
+
+1. **JSON-encoded** (the normal case from `drain_pending_claude.py`
+   line ~375): full proposal with `proposed_entity.slug`. Resolvable.
+
+2. **Plain string** (the edge case at `drain_pending_claude.py`
+   line ~415): Claude said "matched" but the slug didn't exist in
+   the vault; the drain stored just the literal string, losing the
+   proposed slug. NOT resolvable in v1.
+
+The indexer renders both shapes in the queue page but only
+resolves the first. A future fix to the drain should preserve
+the proposed slug in case (2) too; that's a Phase 5+ deferral.
+
+### Section grouping in `_review/queue.md`
+
+Sections are predeclared in `REASON_LABELS` and rendered in
+that order. Reasons not in the list land in `## Other` (catches
+typos / new drain reasons added later without indexer updates).
+Each section has at least one bullet — empty sections are not
+rendered (the order is preserved but sparsely populated).
+
+The bullet shape varies by reason category:
+
+- `claude_unmatched_entity` (JSON): emits `Proposed: \`<slug>\`
+  (<type>)` and `Rationale: <one-sentence>` — actionable info
+  the user needs to decide.
+- Other JSON reasons (unused so far but possible): no special
+  rendering, just the document title + paperless URL.
+- Plain-string reasons: inline the reason as
+  `Reason detail: \`<string>\`` for context.
+
+### Atomic write + gitignored
+
+The queue page writes atomically via temp+fsync+rename, same
+discipline as every other artifact in this repo. It lives at
+`_review/queue.md`, already gitignored by the Slice 4 pattern
+(`examples/sample-vault/_review/`). No new gitignore entry.
+
+### Idempotent
+
+`run()` is safe to call repeatedly. Resolved rows drop out of
+the `needs_review` query in the next iteration; the queue page
+regenerates with the up-to-date count. The architecture
+mentions a 10-minute scheduled cadence; until scheduling lands,
+manual invocation works the same way.
+
+### Out of scope at end of Phase 5 Slice 6
+
+- **Auto-apply Claude's proposed fields** to the now-existing
+  entity. The natural follow-through; deferred so the user
+  controls when to apply (and how to reconcile with their own
+  manual entity creation).
+- **Preserve proposed slug** when the drain stores the
+  plain-string `claude_unmatched_entity` variant. Fix at the
+  drain side; would unblock resolution for this edge case.
+- **Action-hint prose per section.** Each heading has no
+  "what to do next" framing. Defer until real queue traffic
+  shapes what's useful.
+- **Fuzzy / normalised slug resolution.** Exact match only.
+- **Time-bounded queue page** (e.g., "show only rows queued in
+  the last 30 days"). v1 shows everything still queued; old
+  rows accumulate visibly until resolved.
+- **Removing the resolved row from the page entirely vs.
+  surfacing the resolution count.** Current behaviour: page
+  drops the row but reports `resolved_this_run` for one pass
+  of context. Future passes will report 0 once nothing new
+  resolves — that's correct.

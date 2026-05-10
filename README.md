@@ -660,6 +660,67 @@ The digest lands in your inbox. SMTP errors (auth fail, network) raise; the dry-
 - **HTML body.** v1 is plain-text only; markdown-ish structure renders fine in any client.
 - **Bounce / delivery monitoring.** Send + log + done. SMTP errors raise, but post-delivery state isn't tracked.
 
+## Quickstart — Phase 5 Slice 6 (vault indexer + review queue)
+
+The indexer closes the Phase 4b loop. When the `pending_claude` drain leaves a document in `needs_review` with a JSON-encoded `claude_unmatched_entity` proposal (Claude couldn't find an entity to route to, so it proposed one), the user reads the proposal, decides if it's right, and creates the entity in `source/<type>/<slug>/index.md`. `python -m plos.indexer` is what notices that the user did the work — it detects the new entity file, flips the document's status from `needs_review` to `resolved`, and re-renders `_review/queue.md` without that row.
+
+Two responsibilities, one module:
+
+1. **Self-clean.** Scan `documents.status='needs_review'`. For rows whose `review_reason` is a JSON proposal with a `proposed_entity.slug`, check if `entities.find_by_slug(slug)` returns a real file. If yes → flip status to `resolved`. The user's action (creating the entity) is the trigger; no manual mark-as-resolved step.
+2. **Render `_review/queue.md`.** Walk every remaining `needs_review` row, group by reason, write a markdown page. Stable shape — empty queue still renders the page with a "nothing queued" marker.
+
+### Action — run the indexer
+
+```powershell
+python -m plos.indexer
+```
+
+The log line reports `queued_before=N, resolved=M, queued_after=K` and writes the page to `examples/sample-vault/_review/queue.md` (gitignored alongside `compiled/` and `audit-report.md`).
+
+### What success looks like
+
+With the user's existing demo state (one Phase 4b leftover — the MidAmerican bill):
+
+1. **`_review/queue.md` exists** with frontmatter (`type: review`, `artifact: queue`, `queued: 1`, `resolved_this_run: 0`, `by_reason:` count map, `indexer_version: 1`).
+2. **One `## Unmatched entity (Claude proposed)` section** with one bullet:
+   - `doc 2 — 2026-05-09 MidAmericanBill.pdf`
+   - `Proposed: 2835-west-ct-bettendorf (property)`
+   - The rationale Claude gave at drain time
+   - The Paperless URL
+
+### Demoing the resolution loop
+
+```powershell
+# 1. Inspect the queue page to see the proposed slug + type.
+notepad examples\sample-vault\_review\queue.md
+
+# 2. Create the entity at the proposed path.
+#    Edit examples\sample-vault\source\properties\2835-west-ct-bettendorf\index.md
+#    with at least YAML frontmatter (---\n---\n is enough for the indexer's existence check).
+
+# 3. Re-run the indexer.
+python -m plos.indexer
+```
+
+The log line now reports `resolved=1, queued_after=0`. The queue page renders empty.
+
+### The `resolved` status
+
+The indexer adds `'resolved'` to the `documents.status` taxonomy:
+
+- `done` — extractor matched, entity routed, vault written
+- `pending_claude` — no graduated extractor recognized the document
+- `needs_review` — extraction matched but entity is missing/unparseable
+- **`resolved` (new)** — was needs_review; user has since created the proposed entity. The original extracted fields were **not** auto-applied — the user can apply them manually if they want by reading the JSON in `review_reason` and editing the entity.
+- `new` — unchanged
+
+### What this does *not* do (deferred)
+
+- **Apply Claude's `fields:` block to the now-existing entity.** Resolution marks `done` but doesn't write the proposed extraction. The user might have created the entity for reasons that differ from Claude's interpretation; auto-apply should be opt-in once a separate "apply queue proposal" command lands.
+- **Preserve the proposed slug** when the drain stored a plain-string `claude_unmatched_entity` (the edge case from `drain_pending_claude.py:415` where Claude said "matched" but the slug didn't resolve). Those rows have no JSON proposal; they stay queued until a future fix preserves the proposed slug at drain time too.
+- **Action hints per reason in the queue page.** Each section has a heading but no "what to do next" prose. Could be added once real review-queue traffic shapes what hints are useful.
+- **Resolution via fuzzy slug match.** v1 is exact-match-only. If Claude proposes `123-main` but the user creates `123-main-street`, the indexer doesn't notice.
+
 ## License
 
 See [LICENSE](./LICENSE).

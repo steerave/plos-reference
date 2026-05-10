@@ -11,6 +11,40 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 5 Slice 6 — `plos.indexer` review-queue self-cleaner +
+  queue-page renderer.** New `python -m plos.indexer` does two
+  things: (1) scans `documents.status='needs_review'` for rows
+  whose `review_reason` is a JSON proposal with a
+  `proposed_entity.slug`, and if the slug now resolves to a real
+  `source/<type>/<slug>/index.md` flips the row to a new
+  `'resolved'` status; (2) walks the remaining needs-review rows
+  and renders `_review/queue.md` with a section per
+  `review_reason`. Closes the Phase 4b loop: drain proposes, user
+  reads the queue and creates the entity, indexer notices and
+  cleans up. Resolution does NOT auto-apply Claude's proposed
+  `fields` block — that's a separate, opt-in slice.
+- **New `'resolved'` documents.status value** in the taxonomy.
+  Distinct from `'done'`: `done` means the worker wrote
+  extracted fields to an entity; `resolved` means the user
+  closed the no-entity-to-route-to gap but the original
+  extraction was not (auto)-applied. Keeps the audit trail
+  honest.
+- **21 new tests** in `tests/test_indexer.py` covering
+  `parse_review_reason` (None, empty, plain-string, valid JSON,
+  malformed JSON, non-object root), `_proposed_slug`
+  (extraction, missing reason, missing proposed_entity, missing
+  slug, empty slug), `_resolve_unmatched` (entity-exists flips
+  status, entity-absent leaves it, non-JSON reasons skipped,
+  idempotent), `render_queue_page` (empty marker, status line,
+  section grouping, unknown reason → Other, null-title fallback),
+  `run` end-to-end (atomic write, resolve-and-render in one
+  pass), env failure. Suite total: 300 passing.
+- **Live demo verified** against user's SQLite. The MidAmerican
+  bill from a prior Phase 4b drain renders cleanly in
+  `_review/queue.md` under "## Unmatched entity (Claude
+  proposed)" with the proposed slug `2835-west-ct-bettendorf`,
+  type `property`, rationale, and Paperless URL.
+
 - **Phase 5 Slice 5 — `plos.notifications` weekly digest (delivery
   layer).** New `python -m plos.notifications` reads SQLite,
   renders a plain-text digest summarising the past 7 days of
