@@ -1,5 +1,84 @@
 # Project Status Log
 
+## 2026-05-11
+
+**Done:**
+- Closed Phase 3 (mortgage / bank / pay stub) end-to-end. Four atomic
+  feature commits, all pushed:
+  - **Phase 3-0** (`628b7d4`): worker refreshes `documents.document_date`
+    from the Paperless API at the start of each pass — `documents.document_date`
+    is `NULL` at hook time because Paperless's date detection is
+    asynchronous. The worker shifted from `paperless.get_document_text(id)`
+    to `paperless.get_document(id)`, pulls both `content` and
+    `created_date` from the same response, and writes the date back
+    to SQLite when the API has one.
+  - **Phase 3-1** (`6343956`): Mr. Cooper mortgage statement extractor
+    plus a small worker routing generalisation. Each extractor module
+    now exports both `extract` and `route(fields, vault_root)`;
+    `EXTRACTORS` holds `(handler, module)` tuples; a new
+    `RouteResult(path, missing_key)` named tuple distinguishes
+    `no_routing_key_in_extraction` from `unmatched_entity`. Property
+    dashboard gets a second Dataview table for mortgage data.
+  - **Phase 3-2** (`4b104fd`): First Davenport Bank statement extractor
+    + first account entity in the sample vault
+    (`accounts/first-davenport-checking-4521/`) + new
+    `dashboards/account-balances.md`. Worker upserts new entity types
+    via a small `_ENTITY_TYPE_FROM_DIR` dict
+    (`accounts → (account, finance)`, etc.) — no per-type branches.
+  - **Phase 3-3** (`64e679a`): Beacon Software pay stub extractor +
+    first person entity (`people/joe/`) + new `dashboards/income.md`.
+    First composite routing key in the registry — pay stubs route on
+    `(legal_name, employer_current)` together. One subtle regex bug
+    surfaced and got fixed in the same commit: the original
+    `_employee_name` pattern was greedy enough to bleed past the name
+    when adjacent OCR text started with a capitalised word, so the
+    name capture is now anchored on the literal colon and limited to
+    exactly two Capitalized words.
+- Updated project CLAUDE.md with a "Phase 3 conventions" section
+  capturing the extractor `route()` contract, the `RouteResult`
+  semantics, the composite-routing-key pattern, the entity-type-from-
+  directory mapping, the `document_date` refresh decision, the Phase 3
+  fictional providers, and the deferrals.
+- README and CHANGELOG updated per slice — three new "Quickstart" demo
+  walk-throughs (Phase 3 Slice 1, Slice 2, Slice 3) plus a closing
+  "End of Phase 3" note.
+- Reportlab now called with `invariant=1` so regenerated sample PDFs
+  are byte-deterministic across runs (`git diff` stays quiet between
+  fixture rebuilds).
+- Test count: 116 passing in 0.6s (was 56 at end of Phase 2 — added
+  60 tests covering three new extractors, three new entity matchers,
+  the composite routing key, the date-refresh path, the worker's
+  generalised dispatch, and an end-to-end "three documents → three
+  entity types" Phase 3 demo test).
+
+**Next:**
+- Begin Phase 4: first compiled artifact (`compiled/this-week.md`),
+  scheduled daily, plus the Claude Code session workflow that drives
+  it. Phase 4 also brings the long-tail extraction path that drains
+  `pending_claude` documents (real-world bills not matching our four
+  fictional providers route there today and wait).
+- Pick up the deferred Phase 4 housekeeping items if convenient:
+  rename `tests/fixtures/sample_bills/` to something less misleading
+  (it holds mortgages and pay stubs too now); start populating
+  `examples/sample-vault/source/people/joe/` with the richer shape
+  documented in `docs/source-layer-shapes.md` (identity, medical,
+  account-access).
+
+**Notes:**
+- The architecture's "one extractor file + one tuple entry" claim now
+  has three more receipts. The worker hasn't grown a per-doc-type
+  branch since Phase 2.
+- The Phase 3 demo at end-state: drop four PDFs (Phase 2 electric +
+  Phase 3 mortgage/bank/paystub) into `consume/`, watch four
+  extractors route four documents onto three different entity types
+  (property, account, person) through one generic worker, then open
+  three Dataview dashboards in Obsidian and see the rows render live.
+- The extractor route() contract is the largest architectural delta
+  in Phase 3. It absorbed both the simple-key cases (electric_account,
+  mortgage_loan_number, account_number) and the composite-key case
+  (employee_name + employer) without further worker changes — which
+  is the right test for whether the abstraction is at the right level.
+
 ## 2026-05-10
 
 **Done:**

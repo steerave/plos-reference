@@ -150,3 +150,128 @@ bill correspondent is `Acme Power & Light` (account `ACCT-12345`,
 $142.37, 850 kWh). Both are fictional and live in the public reference
 repo. Real-household entities and bills go in the separate private
 operating-instance repo and never land here.
+
+## Phase 3 conventions (decided during the mortgage/bank/paystub build)
+
+Phase 3 added three more graduated extractors and crossed three new
+entity-type boundaries (property→property again via a new key, then
+account, then person). The core architectural decisions:
+
+### Each extractor module exports both `extract` and `route`
+
+Phase 2's `EXTRACTORS` registry held `(handler_name, extract_fn)`
+tuples and the worker hardcoded `entities.find_property_by_electric_account`
+as the only way to route. Phase 3 generalises:
+
+```python
+def extract(text: str, document: DocumentMeta) -> dict[str, Any] | None
+def route(fields: dict[str, Any], vault_root: Path) -> RouteResult
+```
+
+`EXTRACTORS` is now a list of `(handler_name, module)` tuples; adding
+a new extractor is still one import + one tuple entry, the only widening
+is that the module must expose `route` alongside `extract`. The worker
+calls `module.route(...)` — no per-doc-type branches in the worker.
+
+### `RouteResult(path, missing_key)` distinguishes two failure modes
+
+`route` returns a small `NamedTuple` with two fields. The worker
+dispatches:
+
+- `RouteResult(Path(...), False)` — entity matched; merge + done.
+- `RouteResult(None,    True)`    — extractor recognised the document
+  but the routing key wasn't extractable (e.g. an Acme bill OCR'd
+  without a parseable account number). Worker writes `needs_review`
+  with reason `no_routing_key_in_extraction`.
+- `RouteResult(None,    False)`   — routing key extracted, but no
+  entity in the vault claims it. Worker writes `needs_review` with
+  reason `unmatched_entity`.
+
+The Phase 2 `no_account_in_extraction` review reason was generalised
+to `no_routing_key_in_extraction` so the registry can hold extractors
+keyed off any field, not just `electric_account`.
+
+### Composite routing keys
+
+Bank statements route to accounts via a single field (`account_number`).
+Pay stubs require a *pair* — `legal_name` + `employer_current` — because
+neither alone is unique in a household. The pattern is the same: the
+extractor's `extract` returns both fields, and the extractor's `route`
+checks both before delegating to the entity matcher
+(`entities.find_person_by_employer_and_name`). No registry change
+needed; composite keys are just a property of the extractor's `route`
+implementation.
+
+### Worker derives entity type + domain from the matched path
+
+The worker upserts each matched entity into SQLite's `entities` table
+with a `(type, domain)` pair. To stay generic, it derives both from
+the matched index.md path via a small dict:
+
+```python
+_ENTITY_TYPE_FROM_DIR = {
+    "properties":    ("property",     "properties"),
+    "accounts":      ("account",      "finance"),
+    "people":        ("person",       "family"),
+    "vehicles":      ("vehicle",      "vehicles"),
+    "organizations": ("organization", "organizations"),
+}
+```
+
+Adding a new entity type is one entry here plus one extractor whose
+`route` returns a path under the matching `source/<dir>/`. No worker
+logic change.
+
+### Worker refreshes `documents.document_date` from the Paperless API
+
+Paperless's date-detection runs asynchronously after consume. The
+post-consume hook inserts the row with `document_date = NULL`, so the
+worker would silently fall back to `date.today()` and the merge
+contract's freshness rule was meaningless for any field updated more
+than once per calendar day. Phase 3 fixed this: the worker now calls
+`paperless.get_document(id)` once per pass (one round trip for both
+`content` and `created_date`), and writes the API's date back to
+SQLite when present. `paperless.get_document_text(id)` still exists
+for callers that only need the body, but the worker doesn't use it.
+
+### Sample data conventions
+
+Phase 3 fictional providers (all kept in the public reference repo):
+
+- **Mr. Cooper** mortgage statements, loan number `LN-9912345`,
+  principal balance $284,237.18, total amount due $2,452.72.
+  Routes to the existing property `123-main-davenport`.
+- **First Davenport Bank** checking statements, account `ACCT-4521`,
+  ending balance $16,529.74. Routes to the new account
+  `first-davenport-checking-4521`.
+- **Beacon Software** pay stubs for *Joe Sample*, gross $4,615.38,
+  net $3,145.28, YTD gross $36,923.04. Routes to the new person
+  `joe`.
+
+The sample-bill builder at `tests/fixtures/sample_bills/build.py`
+emits all four PDFs (Phase 2 + Phase 3) deterministically — reportlab
+is invoked with `invariant=1` so re-running the script produces
+byte-identical PDFs and `git diff` stays quiet between regenerations.
+
+### Deferrals (still deferred at end of Phase 3)
+
+Out of scope for Phase 3 by design; flagged here so future-Claude
+doesn't read them as gaps:
+
+- **Sensitivity classification.** Pay stubs are treated like any other
+  document; the `documents.sensitivity` field stays at the default
+  `'public'`. Phase 4+ work.
+- **Multi-statement aggregation dashboards.** `account-balances.md`
+  shows the latest only. A "cash-flow over N months" dashboard
+  requires a backlog of statements per account; Phase 3 ships one
+  per account.
+- **`tests/fixtures/sample_bills/` rename.** The folder name is now
+  misleading (it holds mortgage statements, bank statements, and pay
+  stubs alongside the original electric bill). Defer to a Phase 4
+  housekeeping commit.
+- **`_review/queue.md` rendering.** Phase 5 work; Phase 3's
+  `needs_review` rows live in SQLite only.
+- **Schema files in `_schema/`.** Still empty. Frontmatter conventions
+  for new fields land in entity records and are referenced in
+  `CONVENTIONS.md` if they need governance. Phase 4+ may stand up
+  `_schema/` formally.
