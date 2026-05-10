@@ -1052,3 +1052,127 @@ fifth call site lands.
 - **History / trend analysis** (audit-report-over-time).
   Reasonable next step if the user wants to track drift across
   runs, but premature until findings actually accumulate.
+
+## Phase 5 Slice 5 conventions (decided during the notifications build)
+
+Phase 5 Slice 5 turns the vault from a thing-you-look-at into a
+thing-that-finds-you. `python -m plos.notifications` reads SQLite,
+renders a plain-text digest summarising the past 7 days of
+pipeline activity, and (when opted-in) sends it via SMTP. v1
+ships only the "Recent activity" section — the smallest end-to-
+end slice that demonstrates the delivery layer working at all.
+
+### Subtraction-first scope
+
+ARCHITECTURE.md specifies four sections for the digest: recent
+activity, deadlines, anomalies, review-queue summary. v1 ships
+ONE: recent activity. The others have clear hooks into existing
+artifacts (deadlines → entity frontmatter, anomalies →
+`compiled/anomalies.md`, review queue → `documents.status`
+counts) but each adds parsing surface and stylistic choices.
+Better to ship a working pipe to the user's inbox first, then
+fold sections in once we know what actually drives action.
+
+### Stdlib smtplib only
+
+No new dependency. `smtplib` + `email.message.EmailMessage` +
+`ssl.create_default_context()` cover STARTTLS submission to any
+modern SMTP server. Tested against Gmail's `smtp.gmail.com:587`;
+should work with any provider that supports STARTTLS submission.
+
+The Gmail-specific friction is App Passwords (required for
+SMTP when 2FA is on). The README documents the setup; the code
+treats it as just another username/password.
+
+### Dry-run-by-default
+
+`PLOS_NOTIFY_SEND` is the opt-in switch. Default (unset, empty,
+or any non-truthy value) is dry-run: render to stdout, no SMTP
+call. Send mode requires `PLOS_NOTIFY_SEND` to be `1`, `true`,
+`yes`, or `TRUE` (case-sensitive on the uppercase one — small
+list, explicit).
+
+This protects against accidental sends during development. The
+first dozen invocations are typically "what does the digest
+look like?" not "send it now." Once the rendering is tuned,
+flip the env var.
+
+Send-mode env-var validation happens before SMTP connection:
+`_resolve_smtp_config` raises `RuntimeError` listing every
+missing required var (`PLOS_SMTP_USERNAME`,
+`PLOS_SMTP_PASSWORD`, `PLOS_NOTIFY_TO`). Cleaner failure than
+a confusing TLS / auth error mid-handshake.
+
+### As-of override
+
+`PLOS_DIGEST_AS_OF=YYYY-MM-DD` pins "today" for the window
+math, mirroring `PLOS_ANOMALIES_AS_OF` from Slice 2. Tests use
+this; demos can pin to a date with rich activity. Malformed
+values raise on `date.fromisoformat`.
+
+### Window semantics
+
+7-day lookback, end-inclusive: `[as_of - 6 days, as_of]`. The
+SQL bound is `date(d.created_at) >= start AND date(d.created_at)
+< as_of + 1 day` so that documents created today at any time
+are included regardless of HH:MM:SS.
+
+`documents.created_at` is the activity signal — when the row
+landed in the pipeline — not `document_date` (which is the
+document's own date and could be years in the past). The
+digest answers "what did the pipeline do," not "what was
+issued."
+
+### Entity routing via correlated subquery
+
+Each activity row carries the entity slug + type the document
+routed to. The worker writes one entity per document via
+`extracted_fields`, so the relationship is many-rows-per-
+document but one-distinct-entity-per-document. The SQL pulls
+the first entity per document via a `LIMIT 1` correlated
+subquery — defensive against unexpected multi-entity audit
+rows that a future Phase 5+ change might introduce. Documents
+with no `extracted_fields` rows (still `status='new'` or
+`'needs_review'` before Claude drain) render as `unrouted`.
+
+### Plain-text body
+
+ASCII structure with section headings (`Recent activity`,
+underlined) and dash-prefixed bullets. Em-dashes appear in the
+subject and a couple of body strings — they render correctly
+in any modern email client. Windows console mojibakes them
+during dry-run preview (cp1252 doesn't have U+2014); the
+actual email is fine because `smtplib` + `EmailMessage`
+encode UTF-8 with MIME headers.
+
+### `.env.template` updates are user-driven
+
+The reference repo's `.env.template` lives in a Claude Code
+permission-denied directory (the user's local workspace setting).
+The Slice 5 README quickstart documents the new SMTP-related
+env vars and instructs the user to add them to
+`.env.template` if they want them tracked. The module itself
+reads from the live env and tolerates absence (dry-run works
+with zero new env vars set).
+
+### Out of scope at end of Phase 5 Slice 5
+
+- **Deadlines section.** Date-typed entity frontmatter inside
+  a lookahead window. Hooks into the same entity index.md
+  parsing the worker / compile passes use. Slice 6+ if the
+  digest is the right surface for it.
+- **Anomalies + gaps + audit-findings summary.** Parse
+  `compiled/anomalies.md` and `_review/audit-report.md`,
+  surface counts + previews. Slice 6+.
+- **Review-queue summary.** Group `documents.status='needs_review'`
+  by `review_reason`. Pairs naturally with the upcoming
+  `_review/queue.md` rendering work (indexer slice).
+- **Segmentation by owning_entity** for tax/legal isolation.
+  Requires an `owning_entity` frontmatter field (LLC,
+  property, etc.) that the entities don't yet declare.
+- **HTML body.** v1 plain-text only.
+- **Multiple recipients.** `PLOS_NOTIFY_TO` is one address.
+  Comma-separated lists would work in `smtplib` but the
+  `EmailMessage` header would need extra parsing; defer.
+- **Bounce / delivery tracking.** Send-and-forget. SMTP errors
+  raise, but post-delivery state isn't tracked.

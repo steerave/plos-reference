@@ -11,6 +11,40 @@ is the baseline and is not enumerated below.
 
 ### Added
 
+- **Phase 5 Slice 5 — `plos.notifications` weekly digest (delivery
+  layer).** New `python -m plos.notifications` reads SQLite,
+  renders a plain-text digest summarising the past 7 days of
+  pipeline activity, and (when opted-in via `PLOS_NOTIFY_SEND=1`)
+  sends it via SMTP. v1 ships one section — Recent activity —
+  listing every `documents` row created in the past 7 days with
+  the routing entity slug + type and final processing status.
+  Dry-run by default (renders to stdout, no SMTP call). Stdlib
+  `smtplib` over STARTTLS; no new dependency. Tested against
+  Gmail's `smtp.gmail.com:587`.
+- **New env vars** (documented in README quickstart; user adds to
+  `.env.template` if tracked): `PLOS_SMTP_USERNAME`,
+  `PLOS_SMTP_PASSWORD`, `PLOS_NOTIFY_TO` (required for send),
+  `PLOS_SMTP_HOST` (default `smtp.gmail.com`), `PLOS_SMTP_PORT`
+  (default `587`), `PLOS_NOTIFY_FROM` (default = `PLOS_SMTP_USERNAME`),
+  `PLOS_NOTIFY_SEND` (`1`/`true`/`yes`/`TRUE` to actually send),
+  `PLOS_DIGEST_AS_OF` (`YYYY-MM-DD` to override "today" for
+  tests/demos).
+- **27 new tests** in `tests/test_notifications.py` covering
+  `fetch_recent_activity` (empty DB, 7-day window boundaries,
+  routing entity join, unrouted documents, sort order),
+  `render_digest` (subject, empty-window marker, activity rows
+  with null-title and unrouted fallbacks), `send_email` (smtplib
+  mocked: STARTTLS, login, send_message, MIME headers), `run`
+  (dry-run prints + skips SMTP, send invokes SMTP, missing-env
+  raises before SMTP), env-var parsing (`_resolve_as_of` valid /
+  malformed / unset, `_should_send` truthy / falsy parametrized,
+  `_resolve_smtp_config` defaults + missing-var error listing).
+  Suite total: 279 passing.
+- **Live dry-run demo verified** against the user's Paperless +
+  SQLite. 10 documents over the past 7 days, with routing to
+  properties / account / person entities plus 2 unrouted rows
+  (a `needs_review` MidAmerican bill and an old labwork doc).
+
 - **Phase 5 Slice 4 — audit pass.** New `python -m plos.audit_pass`
   verifies every compiled artifact's provenance contract. For each
   of the three v1 artifacts (`this-week.md`, `anomalies.md`,

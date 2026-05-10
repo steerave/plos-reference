@@ -597,6 +597,69 @@ the next `audit_pass` run produces a report with `findings_total: 1+`, the affec
 - **Cross-artifact provenance check.** Doesn't verify that `compiled/anomalies.md` cites paths whose timestamps make sense (e.g., extracted_fields rows that match its `refreshed:`). Out of v1.
 - **Auto-fix.** No "rewrite the artifact to make sources_read match body" command. The fix is to regenerate the artifact via its compile pass.
 
+## Quickstart — Phase 5 Slice 5 (weekly digest notifications)
+
+The delivery layer. `python -m plos.notifications` reads SQLite, renders a plain-text digest summarising the past 7 days of pipeline activity, and (when explicitly opted-in) sends it to your inbox via SMTP. Without this slice, the system writes artifacts the user has to remember to go look at. With it, "PLOS as a thing in your inbox" exists.
+
+v1 ships ONE section — **Recent activity** — listing every `documents` row created in the past 7 days, with the routing entity (slug + type) and final processing status per row. Later slices fold in deadlines, anomalies/gaps/audit summaries, and review-queue counts.
+
+### One-time setup — SMTP env vars
+
+Add to your `.env` (or `.env.template` if you want to track the keys; **never** commit a real password):
+
+```
+# Required to actually send (omit to keep dry-run only):
+PLOS_SMTP_USERNAME=
+PLOS_SMTP_PASSWORD=
+PLOS_NOTIFY_TO=
+
+# Optional (defaults below):
+PLOS_SMTP_HOST=smtp.gmail.com
+PLOS_SMTP_PORT=587
+PLOS_NOTIFY_FROM=        # defaults to PLOS_SMTP_USERNAME
+PLOS_NOTIFY_SEND=        # unset/empty = dry-run; "1"/"true"/"yes"/"TRUE" = send
+PLOS_DIGEST_AS_OF=       # YYYY-MM-DD to pin "today" for testing
+```
+
+For Gmail, `PLOS_SMTP_PASSWORD` must be a **Gmail App Password** (16-char value from `https://myaccount.google.com/apppasswords`), not your Google account password. 2-factor authentication has to be enabled to generate App Passwords.
+
+### Action — dry-run first
+
+```powershell
+# Default behaviour: render to stdout, no network call.
+python -m plos.notifications
+```
+
+The output:
+- A subject line: `PLOS digest — week ending YYYY-MM-DD`
+- The window: `YYYY-MM-DD – YYYY-MM-DD (7-day lookback, end-inclusive)`
+- A `Recent activity` section listing each document with status + routing entity, or `No documents processed this week.` when the window is empty.
+
+### Then actually send
+
+```powershell
+$env:PLOS_NOTIFY_SEND = "1"
+python -m plos.notifications
+Remove-Item Env:PLOS_NOTIFY_SEND
+```
+
+The digest lands in your inbox. SMTP errors (auth fail, network) raise; the dry-run / log line tells you what was attempted.
+
+### What success looks like
+
+- **Dry-run mode** (`PLOS_NOTIFY_SEND` unset) prints the rendered email to stdout, no SMTP call, exit 0.
+- **Send mode** (`PLOS_NOTIFY_SEND=1`) connects to `PLOS_SMTP_HOST:PLOS_SMTP_PORT`, STARTTLS, login, send, exit 0. An email lands in `PLOS_NOTIFY_TO`'s inbox.
+- **Missing required env var in send mode** raises `RuntimeError` listing every missing var; no SMTP call happens.
+
+### What this does *not* do (deferred)
+
+- **Deadlines section** — date-typed entity frontmatter within a lookahead window. Overlaps with `this-week.md` but the digest is the push channel.
+- **Anomalies + gaps + audit-findings summary** — parse `compiled/anomalies.md` and `_review/audit-report.md`, surface counts.
+- **Review-queue summary** — counts of `documents.status='needs_review'` by reason.
+- **Segmentation by owning_entity** (tax/legal isolation per ARCHITECTURE.md). v1 has one flat activity list.
+- **HTML body.** v1 is plain-text only; markdown-ish structure renders fine in any client.
+- **Bounce / delivery monitoring.** Send + log + done. SMTP errors raise, but post-delivery state isn't tracked.
+
 ## License
 
 See [LICENSE](./LICENSE).
