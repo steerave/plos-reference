@@ -53,6 +53,21 @@ def _parse_date(value) -> date | None:
     return None
 
 
+def _api_document_date(doc: dict) -> date | None:
+    """Pick a usable document date from Paperless's API response.
+
+    Paperless's date-detection runs asynchronously after consume, so the
+    date the post-consume hook saw may be NULL even though the API now
+    has one. We check the explicit date fields first, then fall back to
+    the `created` datetime which Paperless sets to the detected date.
+    """
+    for key in ("created_date", "document_date"):
+        d = _parse_date(doc.get(key))
+        if d is not None:
+            return d
+    return _parse_date(doc.get("created"))
+
+
 def _ensure_property_entity(
     conn: sqlite3.Connection, slug: str, wiki_path: str
 ) -> int:
@@ -72,8 +87,16 @@ def _ensure_property_entity(
 def _process_document(
     conn: sqlite3.Connection, row: sqlite3.Row, vault_root: Path
 ) -> None:
-    text = paperless.get_document_text(row["paperless_id"])
-    document_date = _parse_date(row["document_date"])
+    doc = paperless.get_document(row["paperless_id"])
+    text = doc.get("content") or ""
+    existing_date = _parse_date(row["document_date"])
+    api_date = _api_document_date(doc)
+    document_date = api_date or existing_date
+    if api_date is not None and api_date != existing_date:
+        conn.execute(
+            "UPDATE documents SET document_date=? WHERE id=?",
+            (api_date.isoformat(), row["id"]),
+        )
     meta = registry.DocumentMeta(
         paperless_id=row["paperless_id"],
         paperless_url=row["paperless_url"],

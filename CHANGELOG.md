@@ -9,6 +9,18 @@ is the baseline and is not enumerated below.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Phase 3-0:** worker now refreshes `documents.document_date` from the
+  Paperless API at the start of each processing pass. Paperless's date
+  detection runs asynchronously after consume, so the post-consume hook
+  inserts the row with `document_date = NULL`. The previous worker fell
+  back to `date.today()`, which made the merge contract's freshness rule
+  ineffective for any field updated more than once on the same calendar
+  day. The worker now calls `paperless.get_document(id)` once per
+  document, pulls both `content` and `created_date` from the same
+  response, and writes the date back to SQLite if the API has one.
+
 ### Added
 
 - **Phase 2 substrate end-to-end:** graduated-extractor framework

@@ -14,14 +14,11 @@ touched, atomicity (failed processing rolls back partial DB writes).
 from __future__ import annotations
 
 import logging
-from datetime import date
 
 import pytest
 import responses
-from responses import matchers
 
 from plos import db, worker
-from plos.extractors import registry
 
 
 @pytest.fixture(autouse=True)
@@ -73,13 +70,21 @@ def _insert(conn, paperless_id, **kw):
     conn.commit()
 
 
-def _mock_text(paperless_id, text):
+def _mock_document(paperless_id, text, **fields):
+    """Mock the full /api/documents/{id}/ endpoint the worker now calls.
+
+    Default `created_date` mirrors the Phase 2 sample bill so existing
+    tests stay green without setting it explicitly. Pass `created_date=None`
+    to omit the field entirely (used to test the no-date-from-API path).
+    """
+    body = {"content": text, "created_date": "2026-04-15"}
+    body.update(fields)
+    body = {k: v for k, v in body.items() if v is not None}
     responses.add(
         responses.GET,
         f"http://localhost:8888/api/documents/{paperless_id}/",
-        json={"content": text},
+        json=body,
         status=200,
-        match=[matchers.query_param_matcher({"fields": "content"})],
     )
 
 
@@ -107,7 +112,7 @@ def test_skips_rows_not_in_new_status(conn, vault):
 @responses.activate
 def test_unrecognized_document_is_routed_to_pending_claude(conn, vault, caplog):
     _insert(conn, 1, document_date="2026-04-15")
-    _mock_text(1, "This is a Comcast bill, not Acme.")
+    _mock_document(1, "This is a Comcast bill, not Acme.")
 
     with caplog.at_level(logging.INFO, logger="plos.worker"):
         handled = worker.run_one_pass(conn, vault)
@@ -122,7 +127,7 @@ def test_unrecognized_document_is_routed_to_pending_claude(conn, vault, caplog):
 def test_unmatched_entity_routed_to_review(conn, vault, caplog):
     _insert(conn, 1, document_date="2026-04-15")
     bill_for_unknown_account = SAMPLE_BILL.replace("ACCT-12345", "ACCT-UNKNOWN")
-    _mock_text(1, bill_for_unknown_account)
+    _mock_document(1, bill_for_unknown_account)
 
     with caplog.at_level(logging.INFO, logger="plos.worker"):
         worker.run_one_pass(conn, vault)
@@ -137,7 +142,7 @@ def test_unmatched_entity_routed_to_review(conn, vault, caplog):
 @responses.activate
 def test_full_pipeline_writes_vault_and_extracted_fields(conn, vault, caplog):
     _insert(conn, 1, document_date="2026-04-15", correspondent="Acme Power & Light")
-    _mock_text(1, SAMPLE_BILL)
+    _mock_document(1, SAMPLE_BILL)
 
     with caplog.at_level(logging.INFO, logger="plos.worker"):
         worker.run_one_pass(conn, vault)
@@ -198,7 +203,6 @@ def test_processing_failure_leaves_status_new(conn, vault, caplog):
         "http://localhost:8888/api/documents/1/",
         json={"detail": "boom"},
         status=500,
-        match=[matchers.query_param_matcher({"fields": "content"})],
     )
 
     with caplog.at_level(logging.ERROR, logger="plos.worker"):
@@ -213,13 +217,13 @@ def test_processing_failure_leaves_status_new(conn, vault, caplog):
 def test_idempotent_when_re_extracting_same_day_doc(conn, vault):
     """Re-processing the same bill on the same date does not duplicate the audit trail."""
     _insert(conn, 1, document_date="2026-04-15")
-    _mock_text(1, SAMPLE_BILL)
+    _mock_document(1, SAMPLE_BILL)
     worker.run_one_pass(conn, vault)
 
     # Reset the document to status='new' as if Paperless had re-fired the hook
     conn.execute("UPDATE documents SET status='new' WHERE paperless_id=1")
     conn.commit()
-    _mock_text(1, SAMPLE_BILL)
+    _mock_document(1, SAMPLE_BILL)
     worker.run_one_pass(conn, vault)
 
     # Vault freshness rule means the second pass merges nothing — but the
@@ -230,6 +234,50 @@ def test_idempotent_when_re_extracting_same_day_doc(conn, vault):
     # Five fields x 2 passes (the second pass still records the extraction
     # for audit, even though the vault didn't change).
     assert audit_count == 10
+
+
+@responses.activate
+def test_document_date_refreshed_from_paperless_when_null(conn, vault):
+    """Hook inserts with NULL document_date; Paperless detects the date
+    asynchronously. The worker must read it from the API on first
+    processing pass and write it back to SQLite, so the freshness rule
+    sees the real document date instead of falling back to today().
+    """
+    _insert(conn, 1, document_date=None)
+    _mock_document(1, SAMPLE_BILL, created_date="2026-04-15")
+
+    worker.run_one_pass(conn, vault)
+
+    row = conn.execute(
+        "SELECT document_date, status FROM documents WHERE paperless_id=1"
+    ).fetchone()
+    assert row["status"] == "done"
+    assert row["document_date"] == "2026-04-15"
+
+    # The bill the property's frontmatter records carries the real document
+    # date, not today's date.
+    property_path = (
+        vault / "source" / "properties" / "123-main-davenport" / "index.md"
+    )
+    text = property_path.read_text(encoding="utf-8")
+    assert "data_effective_date: '2026-04-15'" in text
+
+
+@responses.activate
+def test_document_date_left_alone_when_api_has_none(conn, vault):
+    """If Paperless's response carries no usable date, the worker should
+    fall back to whatever's already on the row (or today as last resort)
+    rather than overwriting a known SQLite value with NULL."""
+    _insert(conn, 1, document_date="2026-04-15")
+    # Paperless response with no created_date / document_date / created
+    _mock_document(1, SAMPLE_BILL, created_date=None)
+
+    worker.run_one_pass(conn, vault)
+
+    row = conn.execute(
+        "SELECT document_date FROM documents WHERE paperless_id=1"
+    ).fetchone()
+    assert row["document_date"] == "2026-04-15"
 
 
 def test_vault_root_required_in_main(monkeypatch):
