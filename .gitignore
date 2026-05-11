@@ -84,3 +84,6 @@ examples/sample-vault/_review/
 # Real vault data — should never land in this public repo
 real-vault/
 private/
+
+# Local operational instructions / deploy plans — personal scratch
+instructions/
