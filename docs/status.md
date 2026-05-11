@@ -1,5 +1,41 @@
 # Project Status Log
 
+## 2026-05-11
+
+**Done:**
+
+*Phase 4 housekeeping:*
+- fa42385: renamed `tests/fixtures/sample_bills/` → `sample_documents/`; broadened `.gitignore` to cover whole `.obsidian/`, whole `.claude/`, and generated `examples/sample-vault/compiled/`.
+
+*Phase 5 — MVP marker complete:*
+- Phase 5-1 (2294edf): `compile_anomalies.py` percentage-deviation heuristic; `ELIGIBLE_FIELDS` allowlist; empty-deviation short-circuit; three historical Acme bill fixtures so April's $142.37 fires at +29% against Jan–Mar baseline.
+- Phase 5-2 (8af579c): expectation-gaps section in `anomalies.md` (no statement in currently-due calendar month); `EXPECTATION_FIELDS` allowlist; `PLOS_ANOMALIES_AS_OF` env override; combined short-circuit only when both lists empty.
+- Phase 5-3 (3b44dfb): `compile_tax_prep.py` reads `source/tax/<year>/expected-documents.md` and partitions received/missing by the `received:` flag; tax-year auto-detect from US filing calendar; `PLOS_TAX_YEAR` env override; sample vault seeded with 2026 inventory.
+- Phase 5-4 (b468c8c): `audit_pass.py` flags drift between `sources_read:` frontmatter and body `→ /source/...` arrows across all three v1 artifacts; categories undeclared/unused/nonexistent citation; writes `_review/audit-report.md`.
+- Phase 5-5 (aee8911): `notifications.py` weekly-digest delivery layer via stdlib `smtplib` over STARTTLS; dry-run by default; v1 ships one section (recent activity over past 7 days with routing entity + status).
+- Phase 5-6 (ce220ef): `indexer.py` review-queue self-cleaner + `_review/queue.md` renderer; new `'resolved'` status flips when proposed entity gets created in `source/`.
+- Phase 5-7 (ec8a2f7, f530ad2, 3166678): `scripts/scheduled_run.py` wrapper + new `scheduled_runs` SQLite table; `install_schedules.ps1` registers 6 PLOS_* tasks via Schedule.Service COM API; companion `uninstall_schedules.ps1` and `enable_logged_off.ps1`.
+
+*Live verification:*
+- All 6 PLOS_* Windows Task Scheduler tasks registered and in Ready state; fired PLOS_audit_pass through Start-ScheduledTask and confirmed a `scheduled_runs` row landed with `exit_status='success'`.
+- Demoed each compile pass against the user's real Paperless instance: this-week (12s), anomalies (+29% utility deviation + bank-statement May gap), tax-prep (2-of-5 received).
+- Cleaned the real MidAmerican bill (paperless_id=3) from Paperless via API DELETE + SQLite row removed; `_review/queue.md` re-rendered empty.
+
+*Tests:*
+- 167 (start of day) → 307 (+140 across Phase 5 slices). Suite still under 2s.
+
+**Next:**
+- Decide deployment path: (A) iterate further on the public reference repo with the sample vault; (B) stand up the private operating-instance repo with a real-household vault, point `.env` at it; (C) plan the basement-server deployment for long-term hosting.
+- `.env.template` needs the SMTP env-var keys added — permission-denied to Claude, user applies manually.
+- `enable_logged_off.ps1` ready but not yet run; flip to unattended only when basement / operating instance picture is settled.
+- Anomalies Slice 3 (unexpected charges) deferred from Phase 5 — needs transaction-level ingestion (bank extractor emits only summary fields today).
+
+**Notes:**
+- Phase 5 (MVP marker) is complete. The v1 architecture ships end-to-end: hot-path extractors → Claude long-tail drain + corrections → three compiled artifacts → audit pass → weekly digest → review-queue self-cleaner → scheduling. 7 commits today.
+- The public reference repo and the private operating-instance repo are deliberately separate (per top-level CLAUDE.md). The fictional sample vault is the only vault here; real household data routing requires standing up the operating instance, which doesn't yet exist.
+- Two parser traps fixed today: schtasks.exe CLI doesn't round-trip embedded quotes through PowerShell when the repo path contains spaces (fixed by switching install_schedules.ps1 to Schedule.Service COM API — `RegisterTaskDefinition` takes structured objects, no CLI reparsing); em-dash chars in .ps1 files break PowerShell's parser via cp1252 misread (same trap as Phase 4-1's arrow). Standardised on ASCII hyphens in all .ps1 files.
+- Real personal data hygiene precedent: when test runs land actual household docs in Paperless, the cleanup path is Paperless API DELETE + matching SQLite row delete + indexer re-render. All three need to happen for the data to be fully gone.
+
 ## 2026-05-10
 
 **Done:**
