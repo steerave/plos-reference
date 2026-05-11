@@ -35,7 +35,7 @@ foreach ($name in $TaskNames) {
 
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
     if (-not $existing) {
-        Write-Host "  (no such task — skipping)"
+        Write-Host "  (no such task -- skipping)"
         continue
     }
     Unregister-ScheduledTask -TaskName $name -Confirm:$false

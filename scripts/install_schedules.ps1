@@ -29,7 +29,7 @@ param(
     [switch]$WhatIf
 )
 
-# Resolve defaults inside the body — $PSScriptRoot is not reliably
+# Resolve defaults inside the body -- $PSScriptRoot is not reliably
 # populated in the param block across all PowerShell versions.
 if (-not $RepoRoot) {
     $scriptDir = $PSScriptRoot
@@ -212,7 +212,7 @@ foreach ($task in $Tasks) {
     $action = $def.Actions.Create($TASK_ACTION_EXEC)
     $action.Path = $PythonExe
     # Wrapping the wrapper-script path in double quotes survives intact
-    # through the COM API — no command-line reparsing happens.
+    # through the COM API -- no command-line reparsing happens.
     $action.Arguments = "`"$WrapperScript`" $($task.Module)"
     $action.WorkingDirectory = $RepoRoot
 
