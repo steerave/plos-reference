@@ -172,7 +172,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    load_dotenv()
+    load_dotenv(override=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

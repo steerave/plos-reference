@@ -7,7 +7,7 @@ returned content into the extractor registry.
 
 Configuration comes from .env: `PAPERLESS_URL_PUBLIC` for the base URL,
 `PAPERLESS_API_TOKEN` for the bearer token. Both are loaded by the
-worker's `load_dotenv()` call before this module is exercised.
+worker's `load_dotenv(override=True)` call before this module is exercised.
 
 Errors propagate as `requests.HTTPError` (network / 4xx / 5xx) or
 `RuntimeError` (missing env). The worker treats any exception during

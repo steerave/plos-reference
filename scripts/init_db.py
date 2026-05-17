@@ -15,7 +15,7 @@ from plos import db
 
 
 def main() -> int:
-    load_dotenv()
+    load_dotenv(override=True)
     path = os.environ.get("PLOS_DB_PATH")
     if not path:
         print("PLOS_DB_PATH is not set — copy .env.template to .env and edit", file=sys.stderr)

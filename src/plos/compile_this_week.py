@@ -261,7 +261,7 @@ def _resolve_vault_root() -> Path:
 
 
 def main() -> None:
-    load_dotenv()
+    load_dotenv(override=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
